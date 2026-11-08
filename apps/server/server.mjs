@@ -222,6 +222,13 @@ async function handleApi(req, res, parts) {
   const [, area, rawId, sub, subId] = parts;
   const m = req.method;
   if (area === 'health') return sendJson(res, 200, { ok: true, library: LIBRARY });
+  if (area === 'client-error' && m === 'POST') {
+    // Startup errors reported by a browser that couldn't run the app (see index.html).
+    const chunks = [];
+    for await (const c of req) if (chunks.push(c) > 64) break;
+    console.error(`Client error from ${req.socket.remoteAddress}: ${Buffer.concat(chunks).toString('utf8').slice(0, 4000)}`);
+    return sendJson(res, 200, { ok: true });
+  }
 
   if (area === 'uploads' && rawId && m === 'PUT') {
     const id = checkId(rawId);
@@ -293,7 +300,7 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) sendJson(res, status, { error: e.message || 'Server error' });
     else res.destroy();
   } finally {
-    if (process.env.LOG_REQUESTS) console.log(req.method, req.url, res.statusCode, `${Date.now() - started}ms`);
+    if (process.env.LOG_REQUESTS) console.log(new Date().toISOString(), req.socket.remoteAddress, req.method, req.url, res.statusCode, `${Date.now() - started}ms`, req.headers["user-agent"]?.match(/iPad|iPhone|Macintosh|Android/)?.[0] ?? "");
   }
 });
 
