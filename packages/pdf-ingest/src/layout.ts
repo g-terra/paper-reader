@@ -100,6 +100,27 @@ export function removeRunningElements(pages: PageInput[]): void {
     for (const k of seen) counts.set(k, (counts.get(k) ?? 0) + 1);
   }
   const minRepeats = Math.max(2, Math.ceil(pages.length * 0.3));
+  // Running headers that echo a title or section name ("69.4 THE EMERGENCE OF ..." at the top of
+  // the page holding that section) appear twice; the copy in the top margin is the header.
+  const top = (l: Line, p: PageInput) => l.y1 < p.height * 0.09;
+  const occurrences = new Map<string, number>();
+  for (const p of pages) for (const l of p.lines) {
+    const k = normalizeForRepeat(l.text);
+    if (k.length >= 8) occurrences.set(k, (occurrences.get(k) ?? 0) + 1);
+  }
+  const keptOnce = new Set<string>();
+  for (const p of pages) {
+    p.lines = p.lines.filter((l) => {
+      if (!top(l, p)) return true;
+      const k = normalizeForRepeat(l.text);
+      if ((occurrences.get(k) ?? 0) < 2) return true;
+      const nonTop = pages.some((q) => q.lines.some((m) => m !== l && !top(m, q) && normalizeForRepeat(m.text) === k));
+      if (nonTop) return false;
+      if (keptOnce.has(k)) return false;
+      keptOnce.add(k);
+      return true;
+    });
+  }
   for (const p of pages) {
     p.lines = p.lines.filter((l) => {
       if (!marginal(l, p)) return true;
@@ -201,6 +222,33 @@ function mergeRegions(regions: Region[]): Region[] {
           break outer;
         }
   }
+  return out;
+}
+
+/**
+ * Tables set as plain text (no rules): several consecutive lines split into three or more cells.
+ * They are kept as pictures, because reflowing them as prose scrambles the columns.
+ */
+export function findTextTables(page: PageInput, stats: DocumentStats): Rect[] {
+  const rows = page.lines.filter((l) => (l.cells ?? 1) >= 3 && !isCaptionStart(l.text)).sort((a, b) => a.y0 - b.y0);
+  const out: Rect[] = [];
+  let group: Line[] = [];
+  const flush = () => {
+    if (group.length >= 3) {
+      let r: Rect = { x0: group[0].x0, y0: group[0].y0, x1: group[0].x1, y1: group[0].y1 };
+      for (const l of group) r = union(r, l as Rect);
+      // Take in wrapped cell text that sits between the rows.
+      for (const l of page.lines) if (coverage(l as Rect, r) > 0.5) r = union(r, l as Rect);
+      out.push(r);
+    }
+    group = [];
+  };
+  for (const l of rows) {
+    const last = group[group.length - 1];
+    if (last && (l.y0 - last.y1 > stats.leading * 3 || horizontalOverlap(l as Rect, last as Rect) <= 0)) flush();
+    group.push(l);
+  }
+  flush();
   return out;
 }
 
@@ -363,6 +411,13 @@ interface HeadingInfo {
   text: string;
 }
 
+/** Real headings are words: mostly letters, at least one word of three letters, no equations. */
+function wordy(text: string): boolean {
+  const chars = text.replace(/^(?:\d{1,2}(?:\.\d{1,2})*\.?|[IVX]{1,6}\.)\s+/, '').replace(/\s/g, '');
+  const letters = (chars.match(/\p{L}/gu) ?? []).length;
+  return letters >= chars.length * 0.65 && /\p{L}{3}/u.test(text) && !/[=\\]/.test(text);
+}
+
 function headingInfo(line: Line, stats: DocumentStats, gapBefore: number, afterHeading = false, inFront = false): HeadingInfo | null {
   const text = fixSmallCaps(line.text.trim());
   if (text.length < 2 || text.length > 140 || !/\p{L}/u.test(text)) return null;
@@ -379,7 +434,8 @@ function headingInfo(line: Line, stats: DocumentStats, gapBefore: number, afterH
   // Title-page lines (authors, affiliations) are often larger than the body: only real section
   // names count there. OCR sizes are estimates, so OCR'd headings must also look like headings.
   const headingLike = /^[\p{Lu}\d]/u.test(text) && !/[.,;]$/.test(text) && !/[~|_]/.test(text);
-  const sizeOk = bigger && words <= (line.ocr ? 12 : 22) && line.size < bodySize * 3 && (!line.ocr || headingLike);
+  if (!wordy(text) || /^copyright\b/i.test(text) || /^(table|figure|fig\.?)\s*[\dIVX]+\.?$/i.test(text)) return null;
+  const sizeOk = bigger && words <= (line.ocr ? 12 : 22) && line.size < bodySize * 3 && headingLike;
   let ok = false;
   if (inFront && !numbered && !keyword) ok = false;
   else if (sizeOk) ok = true;
@@ -413,6 +469,10 @@ const SENTENCE_END = /[.!?:]["”’')\]]*$/;
 const REFERENCE_START = /^(\[\d{1,3}\]|\d{1,3}\.\s+\p{Lu}|\[[A-Z][A-Za-z+]*\d{2,4}[a-z]?\])/u;
 
 interface OpenParagraph {
+  /** Number of lines joined so far. */
+  lines?: number;
+  /** The first line is short and has no closing punctuation (a possible unstyled subheading). */
+  headingCandidate?: boolean;
   kind: 'paragraph' | 'heading';
   level: 2 | 3 | 4;
   role: BlockRole;
@@ -568,7 +628,7 @@ export function assembleBlocks(pages: { page: number; height: number; items: Flo
       if (!startNew && open && prev) {
         const prevLine = prev.line;
         const sizeChange = Math.abs(prevLine.size - line.size) > Math.max(prevLine.size, line.size) * (line.ocr || prevLine.ocr ? 0.25 : 0.12);
-        const roleChange = open.role !== role && !(open.role === 'caption' && role !== 'note') && !(open.role === 'note' && role === 'body' && !sizeChange);
+        const roleChange = open.role !== role && !(open.role === 'caption' && (role === 'note' || role === 'body')) && !(open.role === 'note' && role === 'body' && !sizeChange);
         if (sizeChange || roleChange) startNew = true;
         else if (role === 'reference') {
           const outdent = line.x0 < prevLine.x0 - line.size * 0.6;
@@ -591,12 +651,25 @@ export function assembleBlocks(pages: { page: number; height: number; items: Flo
         }
       }
 
+      // A one-line "paragraph" that is short, unpunctuated and followed by more text is a subheading
+      // set in the body font ("Cognitive and Executive Functioning Benefits").
+      const cur = open as OpenParagraph | null;
+      if (cur && cur.kind === 'paragraph' && cur.lines === 1 && cur.headingCandidate && cur.role === 'body') {
+        cur.kind = 'heading';
+        cur.level = cur.last.line.bold > 0.7 || cur.last.line.size > bodySize * 1.05 ? 3 : 4;
+        startNew = true;
+      }
       if (startNew) {
         close();
-        open = { kind: 'paragraph', level: 2, role, text, page: line.page, last: item };
+        const words = text.split(' ').length;
+        const short = line.x1 < item.colRight - line.size * 4 && line.x0 <= item.colLeft + line.size * 0.7;
+        const headingCandidate =
+          role === 'body' && short && words >= 1 && words <= 12 && /^[\p{Lu}\d]/u.test(text) && !/[.,;:!?)\]]$/.test(text) && !/[=]/.test(text) && line.math < 0.2 && text.length >= 4 && wordy(text) && !/^(table|figure|fig\.?)\s*[\dIVX]+\.?$/i.test(text);
+        open = { kind: 'paragraph', level: 2, role, text, page: line.page, last: item, lines: 1, headingCandidate };
       } else if (open) {
         open.text = joinLines(open.text, text);
         open.last = item;
+        open.lines = (open.lines ?? 1) + 1;
       }
     }
   }
@@ -638,24 +711,102 @@ const AFFILIATION =
   /universit|institut|department|dept\.|school|college|laborator|\blab\b|research|center|centre|inc\.|corp|ltd|gmbh|google|microsoft|facebook|meta ai|amazon|ibm|nvidia|openai|deepmind|hospital|faculty|academy|street|road|avenue|email|correspond|equal contribution|@|http|www\.|\d{4,}/i;
 const NAME = /^\p{Lu}[\p{L}'’.-]*(?:\s+(?:\p{Lu}[\p{L}'’.-]*|van|von|de|da|der|den|del|di|du|la|le|dos|das|bin|al)){1,4}$/u;
 
-export function extractAuthors(blocks: Block[]): string[] {
-  const out: string[] = [];
-  for (const b of blocks) {
-    if (b.kind === 'heading') break;
-    if (b.kind !== 'paragraph' || b.role !== 'front') continue;
-    if (AFFILIATION.test(b.text) && !/,/.test(b.text.split(/\d/)[0])) continue;
-    const parts = b.text
-      .replace(/[∗*†‡§¶⋆♣♠♦♥#]/g, ',')
-      .replace(/(\p{L})\d+(,\d+)*/gu, '$1,')
-      .split(/,|;|\band\b|&|\s{2,}|·|\|/);
-    for (let p of parts) {
-      p = p.replace(/\s+/g, ' ').trim().replace(/^["'“”‘’`]+|["'“”‘’`~]+$/g, '').trim();
-      if (!p || AFFILIATION.test(p)) continue;
-      if (NAME.test(p) && p.length < 40 && !out.includes(p) && !SECTION_KEYWORDS.test(p)) out.push(p);
+function splitNames(text: string): string[] {
+  return text
+    .replace(/[∗*†‡§¶⋆♣♠♦♥#⇑✉]/g, ',')
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹˒]+/g, ',')
+    .replace(/(\p{L})\d+(,\d+)*/gu, '$1,')
+    .split(/,|;|\band\b|&|\s{2,}|·|\|/)
+    .map((p) => p.replace(/\s+/g, ' ').trim().replace(/^["'“”‘’`]+|["'“”‘’`~´˜]+$/g, '').trim())
+    .filter(Boolean);
+}
+
+const isName = (p: string) => NAME.test(p) && p.length < 40 && p !== p.toUpperCase() && !SECTION_KEYWORDS.test(p) && !AFFILIATION.test(p);
+
+/** "John R. Anderson Carnegie-Mellon University" -> "John R. Anderson". */
+function leadingName(p: string): string | undefined {
+  const words = p.split(' ');
+  for (let k = 2; k <= Math.min(4, words.length - 1); k++) {
+    const cand = words.slice(0, k).join(' ').replace(/[-*∗†‡]+$/, '');
+    if (/^\p{Lu}\.?$/u.test(words[k - 1])) continue; // ends in an initial
+    if (isName(cand) && AFFILIATION.test(words.slice(k).join(' '))) return cand;
+  }
+  return undefined;
+}
+
+/** Names in a block, or undefined when the block is not mostly names. */
+function namesIn(text: string): string[] | undefined {
+  const parts = splitNames(text);
+  if (!parts.length || text.length > 400) return undefined;
+  const names: string[] = [];
+  let other = 0;
+  for (const p of parts) {
+    if (isName(p)) names.push(p);
+    else {
+      const lead = leadingName(p);
+      if (lead) names.push(lead);
+      // "R. S. W. Masters* Department of Psychology, York": the rest is the affiliation.
+      else if (names.length && AFFILIATION.test(p)) break;
+      else other += p.length;
     }
+  }
+  const nameChars = names.reduce((n, p) => n + p.length, 0);
+  return names.length && nameChars >= other ? names : undefined;
+}
+
+/**
+ * Authors are the lines straight after the title that consist mostly of names. Journal labels
+ * ("OPEN ACCESS"), affiliations and editors are skipped. Returns the names and the indexes of
+ * the blocks they came from.
+ */
+export function extractAuthors(blocks: Block[]): string[] {
+  return findAuthors(blocks).names;
+}
+
+export function findAuthors(blocks: Block[]): { names: string[]; indexes: number[] } {
+  const out: string[] = [];
+  const indexes: number[] = [];
+  const t = blocks.findIndex((b) => b.kind === 'title');
+  for (let i = t + 1; i < blocks.length && i <= t + 8; i++) {
+    const b = blocks[i];
+    if (b.kind === 'figure') continue;
+    if (b.kind === 'title') break;
+    const usable = (b.kind === 'paragraph' && (b.role === 'front' || b.role === 'note')) || (b.kind === 'heading' && i === t + 1);
+    const names = usable ? namesIn(b.text) : undefined;
+    if (!names) {
+      if (out.length) break;
+      if (b.kind === 'heading' || (b.kind === 'paragraph' && b.role !== 'front' && b.role !== 'note')) break;
+      continue;
+    }
+    for (const n of names) if (!out.includes(n)) out.push(n);
+    indexes.push(i);
     if (out.length >= 15) break;
   }
-  return out;
+  return { names: out, indexes };
+}
+
+const FRONT_NOTE = /^(?:[*∗†‡⇑✉]|e-?mail\b|correspondence\b|requests for reprints|pii\b|issn\b|doi\b|https?:|corresponding author|received\b)|©|all rights reserved|\b\d{4}-\d{3}[\dX]\//i;
+
+/** Footnotes printed under the abstract (corresponding author, PII, copyright) are notes. */
+export function tidyFrontNotes(blocks: Block[]): void {
+  // A title that ends mid-phrase ("... under") continues on the next short front line.
+  const t = blocks.findIndex((b) => b.kind === 'title');
+  const next = blocks[t + 1];
+  if (t >= 0 && next?.kind === 'paragraph' && next.role === 'front' && next.text.split(' ').length <= 8) {
+    const title = blocks[t] as Extract<Block, { kind: 'title' }>;
+    if (/\b(under|of|the|and|in|for|to|on|with|a|an|from|by|versus|vs\.?|between|during|at|into)$/i.test(title.text) || /^\p{Ll}/u.test(next.text)) {
+      title.text = `${title.text} ${next.text}`;
+      blocks.splice(t + 1, 1);
+    }
+  }
+  // An abstract that never ended (common on scans) spills into the body.
+  let abstractChars = 0;
+  for (const b of blocks) {
+    if (b.kind !== 'paragraph' || b.role !== 'abstract') continue;
+    if (abstractChars > 1800) b.role = 'body';
+    abstractChars += b.text.length;
+  }
+  for (const b of blocks) if (b.kind === 'paragraph' && (b.role === 'abstract' || b.role === 'front') && FRONT_NOTE.test(b.text) && b.text.length < 400) b.role = 'note';
 }
 
 export function extractAbstract(blocks: Block[]): string | undefined {
@@ -663,4 +814,41 @@ export function extractAbstract(blocks: Block[]): string | undefined {
   if (parts.length) return parts.join(' ').slice(0, 1500);
   const firstBody = blocks.find((b): b is Extract<Block, { kind: 'paragraph' }> => b.kind === 'paragraph' && b.role === 'body' && b.text.length > 200);
   return firstBody?.text.slice(0, 600);
+}
+
+const plainNumber = (t: string) => /^\d{1,2}\.?\s/.test(t) && !/^\d+\.\d/.test(t);
+
+/**
+ * Document-level heading clean-up: numbered "headings" that follow each other with nothing in
+ * between are a list, and a heading repeated four or more times is a table's header row.
+ */
+export function tidyHeadings(blocks: Block[]): void {
+  const toParagraph = (i: number) => {
+    const b = blocks[i];
+    if (b.kind === 'heading') blocks[i] = { kind: 'paragraph', role: 'body', text: b.text, page: b.page };
+  };
+  for (let i = 0; i < blocks.length; i++) {
+    let j = i;
+    while (j < blocks.length && blocks[j].kind === 'heading' && plainNumber((blocks[j] as { text: string }).text)) j++;
+    if (j - i >= 2) for (let k = i; k < j; k++) toParagraph(k);
+    i = Math.max(i, j - 1);
+  }
+  const counts = new Map<string, number>();
+  for (const b of blocks) if (b.kind === 'heading') counts.set(b.text, (counts.get(b.text) ?? 0) + 1);
+  blocks.forEach((b, i) => b.kind === 'heading' && (counts.get(b.text) ?? 0) >= 4 && !SECTION_KEYWORDS.test(b.text) && toParagraph(i));
+  // A numbered section ("69.4 ...") appears once; later copies are running headers.
+  const seen = new Set<string>();
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (b.kind !== 'heading' || !/^\d+\.\d+/.test(b.text)) continue;
+    if (seen.has(b.text)) blocks.splice(i--, 1);
+    else seen.add(b.text);
+  }
+}
+
+const DATABASE_NOTICE = /^copyright of .{3,200} is the property of|may not be copied or emailed to multiple sites|download, or email articles for individual use/i;
+
+/** Drops the copyright notice that article databases (EBSCO) append to the last page. */
+export function dropDatabaseNotice(blocks: Block[]): Block[] {
+  return blocks.filter((b) => !((b.kind === 'paragraph' || b.kind === 'heading') && DATABASE_NOTICE.test(b.text)));
 }

@@ -32,6 +32,8 @@ export interface Line {
   page: number;
   /** Number of separate segments found on the same visual row (tables, equations with numbers). */
   rowSegments: number;
+  /** Number of cells in the line when it is split by wide gaps (table rows have several). */
+  cells?: number;
   /** True for lines read with OCR, whose font sizes are only estimates. */
   ocr?: boolean;
 }
@@ -45,6 +47,17 @@ const LIGATURES: Record<string, string> = {
   'ﬅ': 'st',
   'ﬆ': 'st',
 };
+
+const COMBINING: Record<string, string> = { '´': '\u0301', '`': '\u0300', '˜': '\u0303', '¨': '\u0308', 'ˆ': '\u0302', '¸': '\u0327', 'ˇ': '\u030C', '˚': '\u030A' };
+
+/** TeX papers draw accents as separate glyphs before the letter ("Cl´audio", "S˜ao"). */
+export function composeAccents(s: string): string {
+  // A backtick only counts inside a word, so TeX quotes (``like this'') survive.
+  return s.replace(/([´˜¨ˆ¸ˇ˚]|(?<=\p{L})`) ?(\p{L})/gu, (m, a: string, l: string) => {
+    const c = ((l === 'ı' ? 'i' : l) + COMBINING[a]).normalize('NFC');
+    return c.length === 1 ? c : m;
+  });
+}
 
 export function cleanText(s: string): string {
   return s
@@ -84,8 +97,38 @@ export interface Gutter {
   width: number;
 }
 
-export function findGutters(rows: { glyphs: Glyph[]; size: number }[], pageWidth: number): Gutter[] {
-  if (rows.length < 12) return [];
+type GutterRow = { glyphs: Glyph[]; size: number };
+
+/**
+ * Column gutters for the page. Looks at the whole page and at bands of consecutive rows, so a
+ * two-column section below a long full-width title block or abstract is still found.
+ */
+export function findGutters(rows: GutterRow[], pageWidth: number): Gutter[] {
+  const cands: { x: number; width: number; support: number }[] = [];
+  for (const g of findGuttersIn(rows, pageWidth, false)) cands.push({ ...g, support: 3 });
+  const sorted = [...rows].sort((a, b) => a.glyphs[0].y - b.glyphs[0].y);
+  for (let start = 0; start + 8 <= sorted.length; start += 7) {
+    for (const g of findGuttersIn(sorted.slice(start, start + 14), pageWidth, true)) cands.push({ ...g, support: 1 });
+  }
+  const clusters: { xs: number[]; width: number; support: number }[] = [];
+  for (const c of cands.sort((a, b) => a.x - b.x)) {
+    const last = clusters[clusters.length - 1];
+    if (last && Math.abs(c.x - last.xs[last.xs.length - 1]) < 12) {
+      last.xs.push(c.x);
+      last.width = Math.min(last.width, c.width);
+      last.support += c.support;
+    } else clusters.push({ xs: [c.x], width: c.width, support: c.support });
+  }
+  return clusters
+    .filter((c) => c.support >= 2)
+    .sort((a, b) => b.support - a.support)
+    .slice(0, 2)
+    .map((c) => ({ x: c.xs[c.xs.length >> 1], width: c.width }))
+    .sort((a, b) => a.x - b.x);
+}
+
+function findGuttersIn(rows: GutterRow[], pageWidth: number, local: boolean): Gutter[] {
+  if (rows.length < (local ? 8 : 12)) return [];
   const bins = Math.ceil(pageWidth) + 2;
   const cover = new Uint16Array(bins);
   const minXs: number[] = [];
@@ -116,7 +159,7 @@ export function findGutters(rows: { glyphs: Glyph[]; size: number }[], pageWidth
   for (let x = Math.floor(left); x <= Math.ceil(right); x++) inside.push(cover[x] ?? 0);
   inside.sort((a, b) => a - b);
   const ref = inside[Math.floor(inside.length * 0.8)] || 0;
-  if (ref < 8) return [];
+  if (ref < (local ? 4 : 8)) return [];
 
   const from = Math.floor(left + extent * 0.22);
   const to = Math.ceil(right - extent * 0.22);
@@ -157,7 +200,7 @@ export function findGutters(rows: { glyphs: Glyph[]; size: number }[], pageWidth
       if (r.glyphs.some((g) => g.x + g.w <= x && g.x + g.w > x - 70)) leftRows++;
       if (r.glyphs.some((g) => g.x >= x && g.x < x + 70)) rightRows++;
     }
-    const need = Math.max(5, rows.length * 0.08);
+    const need = local ? Math.max(4, rows.length * 0.3) : Math.max(5, rows.length * 0.08);
     if (leftRows < need || rightRows < need) continue;
     if (gutters.some((g) => Math.abs(g.x - x) < extent * 0.2)) continue;
     gutters.push({ x, width: cand.width });
@@ -226,13 +269,53 @@ export function buildLines(input: Glyph[], page: number, pageWidth = 1000): { li
       const line = segmentToLine(seg, page);
       if (line) {
         line.rowSegments = segments.length;
+        line.cells = countCells(seg, row.size);
         lines.push(line);
       }
     }
   }
   return { lines, gutters: gutters.map((g) => g.x) };
 }
+/** Counts the cells of a line separated by gaps much wider than a word space. */
+export function countCells(seg: Glyph[], size: number): number {
+  let cells = 1;
+  let right = -Infinity;
+  for (const g of seg) {
+    if (right > -Infinity && g.x - right > Math.max(size * 1.5, 8)) cells++;
+    right = Math.max(right, g.x + g.w);
+  }
+  return cells;
+}
+
+const SUPERSCRIPT: Record<string, string> = {
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', ',': '˒', '–': '⁻',
+};
+
+/** Superscript digits become Unicode superscripts; affiliation letters (ᵃ, ABD) are dropped. */
+function superscript(s: string): string {
+  const t = s.trim();
+  if (/^[\d+\-−=(),–\s]+$/.test(t)) return [...t].map((c) => SUPERSCRIPT[c] ?? '').join('');
+  if (/^[*†‡§¶#∗⋆]+$/.test(t)) return t;
+  // Affiliation markers: "a", "a,b", "a,*", "1ABD", "c,d". Letters go; digits and symbols stay.
+  if (/^(?:[A-Z]{1,5}|[a-z]{1,2}|\d{1,2}[A-Z]{0,5})(?:[,\s]*(?:[A-Z]{1,5}|[a-z]{1,2}|\d{1,2}|[*†‡§¶#∗⋆⇑]))*[,*]?$/.test(t)) {
+    const kept = t.replace(/[A-Za-z]/g, '').replace(/^[,\s]+|[,\s]+$/g, '').replace(/,(?=[*†‡§¶#∗⋆⇑])|(?<=[*†‡§¶#∗⋆⇑]),/g, '');
+    return [...kept].map((c) => SUPERSCRIPT[c] ?? c).join('');
+  }
+  return s;
+}
+
 export function segmentToLine(seg: Glyph[], page: number): Line | null {
+  // Dominant size and baseline first, to recognise superscripts.
+  const weights0 = new Map<number, number>();
+  for (const g of seg) {
+    const k = Math.round(g.size * 2) / 2;
+    weights0.set(k, (weights0.get(k) ?? 0) + g.str.trim().length);
+  }
+  let mainSize = 0;
+  let w0 = -1;
+  for (const [k, w] of weights0) if (w > w0 || (w === w0 && k > mainSize)) (mainSize = k), (w0 = w);
+  const mainBase = median(seg.filter((g) => Math.abs(g.size - mainSize) < mainSize * 0.15).map((g) => g.y));
   let text = '';
   let prev: Glyph | undefined;
   let chars = 0;
@@ -240,13 +323,15 @@ export function segmentToLine(seg: Glyph[], page: number): Line | null {
   let mathChars = 0;
   const sizeWeights = new Map<number, number>();
   for (const g of seg) {
-    const s = cleanText(g.str);
+    const sup = g.size < mainSize * 0.8 && mainBase - g.y > mainSize * 0.18 && seg.length > 1;
+    const s = sup ? superscript(cleanText(g.str)) : cleanText(g.str);
+    if (sup && !s) continue;
     if (prev) {
       // Fake bold: the same run drawn twice at almost the same spot.
       if (s === cleanText(prev.str) && Math.abs(g.x - prev.x) < 1.5) continue;
       const gap = g.x - (prev.x + prev.w);
       const size = Math.min(g.size, prev.size);
-      if (gap > size * 0.12 && !text.endsWith(' ') && !s.startsWith(' ')) text += ' ';
+      if (!sup && gap > size * 0.12 && !text.endsWith(' ') && !s.startsWith(' ')) text += ' ';
     }
     text += s;
     const n = s.replace(/\s/g, '').length;
@@ -257,7 +342,7 @@ export function segmentToLine(seg: Glyph[], page: number): Line | null {
     sizeWeights.set(key, (sizeWeights.get(key) ?? 0) + n);
     prev = g;
   }
-  text = text.replace(/\s+/g, ' ').trim();
+  text = composeAccents(text.replace(/\s+/g, ' ').trim());
   if (!text) return null;
   let size = 0;
   let bestWeight = -1;
