@@ -9,7 +9,7 @@ const c = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
 const p = await c.newPage();
 const errors = [];
 p.on('pageerror', (e) => errors.push(e.message));
-await p.goto(process.env.APP_URL ?? 'http://localhost:5173/');
+await p.goto(process.env.APP_URL ?? 'http://localhost:4300/');
 await p.evaluate(() => localStorage.setItem('paper-reader:settings', JSON.stringify({ theme: 'night' })));
 await p.reload();
 await p.locator('input[type=file]').setInputFiles(['fixtures/two-column-paper.pdf']);

@@ -1,0 +1,12 @@
+{
+  "name": "@paper-reader/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Serves the reader on the local network and keeps the library in a folder on this computer.",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/"
+  },
+  "engines": { "node": ">=20" }
+}

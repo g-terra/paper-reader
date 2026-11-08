@@ -9,7 +9,7 @@ import { basename, join } from 'node:path';
 
 const file = process.argv[2];
 const outDir = process.argv[3] ?? '/tmp/ingest-out';
-const base = process.env.APP_URL ?? 'http://localhost:5173/';
+const base = process.env.APP_URL ?? 'http://localhost:4300/';
 mkdirSync(outDir, { recursive: true });
 
 const browser = await chromium.launch();
@@ -22,26 +22,21 @@ await page.locator('input[type=file]').setInputFiles(file);
 const t0 = Date.now();
 await page.waitForFunction(() => document.body.innerText.includes('Added to your library') || document.body.innerText.includes('Could not import'), null, { timeout: 600_000 });
 const ms = Date.now() - t0;
-const dump = await page.evaluate(async () => {
-  const open = indexedDB.open('paper-reader');
-  const db = await new Promise((res, rej) => ((open.onsuccess = () => res(open.result)), (open.onerror = rej)));
-  const get = (store) => new Promise((res) => {
-    const r = db.transaction(store).objectStore(store).getAll();
-    r.onsuccess = () => res(r.result);
-  });
-  const papers = await get('papers');
-  const contents = await get('contents');
-  const images = await get('images');
-  const toData = (blob) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
-  const imgs = [];
-  for (const im of images) imgs.push({ id: im.id, width: im.width, height: im.height, data: await toData(im.blob) });
-  const p = papers[papers.length - 1];
-  const { cover, ...meta } = p;
-  return { meta, blocks: contents.find((c) => c.paperId === p.id)?.blocks, images: imgs };
-});
+// The library lives on the server: read the newest paper back through its API.
+const api = (p) => new URL(`api/${p}`, base).href;
+const papers = await (await fetch(api('papers'))).json();
+const meta = papers.sort((x, y) => x.addedAt - y.addedAt).at(-1);
+const { blocks } = await (await fetch(api(`papers/${meta.id}/content`))).json();
+const images = [];
+for (const b of blocks) {
+  if (b.kind !== 'figure') continue;
+  const buf = Buffer.from(await (await fetch(api(`papers/${meta.id}/images/${b.imageId}`))).arrayBuffer());
+  images.push({ id: b.imageId, buf });
+}
+const dump = { meta, blocks, images };
 const name = basename(file, '.pdf');
 writeFileSync(join(outDir, `${name}.json`), JSON.stringify({ meta: dump.meta, blocks: dump.blocks }, null, 2));
-for (const im of dump.images) writeFileSync(join(outDir, `${name}-${im.id}.png`), Buffer.from(im.data.split(',')[1], 'base64'));
+for (const im of dump.images) writeFileSync(join(outDir, `${name}-${im.id}.png`), im.buf);
 console.log(`import took ${ms} ms; ${dump.blocks?.length} blocks; ${dump.images.length} images`);
 console.log('title:', dump.meta.title, '| authors:', dump.meta.authors.join('; '), '| kind:', dump.meta.kind, '| pages:', dump.meta.pageCount);
 for (const [i, b] of (dump.blocks ?? []).entries()) {

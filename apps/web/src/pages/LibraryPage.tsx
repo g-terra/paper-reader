@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
 import {
   AppBar,
   Button,
@@ -18,6 +17,7 @@ import {
   Toolbar,
   Tooltip,
   useMediaQuery,
+  Alert,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
@@ -26,19 +26,18 @@ import SortRounded from '@mui/icons-material/SortRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import UploadFileRounded from '@mui/icons-material/UploadFileRounded';
 import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
-import { db, deletePaper, type PaperRecord } from '../lib/db';
+import { coverUrl, deletePaper, refreshLibrary, useLibrary, type PaperRecord } from '../lib/db';
 import { enqueueFiles } from '../lib/importer';
 import { CardSkeleton, PaperCard } from '../components/PaperCard';
 import { Sheet } from '../components/Sheet';
 import { AppearanceControls } from '../components/AppearanceControls';
-import { useBlobUrl } from '../lib/useBlobUrl';
 import { authorLine, fileSize, relativeTime } from '../lib/format';
 
 type Sort = 'recent' | 'added' | 'title';
 const SORT_LABEL: Record<Sort, string> = { recent: 'Recently read', added: 'Recently added', title: 'Title' };
 
 export function LibraryPage() {
-  const papers = useLiveQuery(() => db.papers.toArray(), []);
+  const { papers, error: libraryError } = useLibrary();
   const navigate = useNavigate();
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
@@ -134,6 +133,11 @@ export function LibraryPage() {
       </Menu>
 
       <main className="mx-auto w-full max-w-6xl px-4 pt-5 pb-28 sm:px-6 sm:pt-8">
+        {libraryError && (
+          <Alert severity="warning" sx={{ mb: 3 }} action={<Button color="inherit" size="small" onClick={() => void refreshLibrary()}>Retry</Button>}>
+            {libraryError} Make sure the reader is still running on your Mac.
+          </Alert>
+        )}
         {current && !query && <ContinueCard paper={current} onOpen={() => navigate(`/read/${current.id}`)} />}
 
         {list === undefined ? (
@@ -182,7 +186,7 @@ export function LibraryPage() {
 
       <Dialog open={!!toDelete} onClose={() => setToDelete(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Remove this paper?</DialogTitle>
-        <DialogContent className="text-sm text-muted">“{toDelete?.title}” and your reading position will be removed from this device.</DialogContent>
+        <DialogContent className="text-sm text-muted">“{toDelete?.title}” and your reading position will be removed from your library.</DialogContent>
         <DialogActions>
           <Button onClick={() => setToDelete(null)}>Cancel</Button>
           <Button
@@ -236,7 +240,7 @@ function Grid({ children }: { children: React.ReactNode }) {
 }
 
 function ContinueCard({ paper, onOpen }: { paper: PaperRecord; onOpen: () => void }) {
-  const cover = useBlobUrl(paper.cover);
+  const cover = coverUrl(paper);
   return (
     <button
       type="button"
@@ -268,7 +272,7 @@ function EmptyState({ onPick }: { onPick: () => void }) {
       <h1 className="mt-6 font-serif text-2xl font-semibold sm:text-3xl">Your reading shelf is empty</h1>
       <p className="mt-3 text-[15px] leading-relaxed text-muted">
         Add academic papers as PDFs. Text is reflowed into a comfortable, book-like page. Scanned papers are read with OCR, and figures, tables and equations are kept as
-        images. Everything stays on this device.
+        images. Your library is kept on the computer that runs the reader, so every device sees the same papers.
       </p>
       <Button variant="contained" size="large" startIcon={<AddRounded />} onClick={onPick} sx={{ mt: 4, px: 3.5, py: 1.25 }}>
         Add PDF papers

@@ -9,7 +9,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on('console', (m) => console.log('LOG', m.text()));
 page.on('pageerror', (e) => console.log('pageerror', e.message));
-await page.goto('http://localhost:5173/');
+await page.goto('http://localhost:4300/');
 const b64 = readFileSync(file).toString('base64');
 const out = await page.evaluate(async ({ b64, pageNo }) => {
   const root = '/@fs/home/user/paper-reader/packages/pdf-ingest/src/';

@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
 const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on('console', (m) => m.text().startsWith('OCR') && console.log(m.text()));
-await page.goto('http://localhost:5173/');
+await page.goto('http://localhost:4300/');
 await page.evaluate(() => (globalThis.__debugOcr = true));
 await page.locator('input[type=file]').setInputFiles(process.argv[2]);
 await page.waitForFunction(() => document.body.innerText.includes('Added to your library'), null, { timeout: 600000 });

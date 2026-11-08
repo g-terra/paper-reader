@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs';
 const require = createRequire(execSync('npm root -g').toString().trim() + '/');
 const { chromium, devices } = require('playwright');
 const out = process.argv[2] ?? '/tmp/screens';
-const base = process.env.APP_URL ?? 'http://localhost:5173/';
+const base = process.env.APP_URL ?? 'http://localhost:4300/';
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });

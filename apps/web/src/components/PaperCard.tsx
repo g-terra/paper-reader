@@ -4,8 +4,7 @@ import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import InfoOutlined from '@mui/icons-material/InfoOutlined';
 import DocumentScannerOutlined from '@mui/icons-material/DocumentScannerOutlined';
-import type { PaperRecord } from '../lib/db';
-import { useBlobUrl } from '../lib/useBlobUrl';
+import { coverUrl, type PaperRecord } from '../lib/db';
 import { authorLine } from '../lib/format';
 
 interface Props {
@@ -16,7 +15,7 @@ interface Props {
 }
 
 export function PaperCard({ paper, onOpen, onDelete, onDetails }: Props) {
-  const cover = useBlobUrl(paper.cover);
+  const cover = coverUrl(paper);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const pct = Math.round(paper.progress * 100);
 

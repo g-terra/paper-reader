@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { configurePdfWorker, ingestPdf } from '@paper-reader/pdf-ingest';
-import { db, requestPersistentStorage, type PaperRecord } from './db';
+import { savePaper, type PaperRecord } from './db';
 import { makeId } from './id';
 
 configurePdfWorker(workerUrl, {
@@ -56,7 +56,6 @@ export function enqueueFiles(list: FileList | File[]): number {
   }
   if (added) {
     emit();
-    void requestPersistentStorage();
     void run();
   }
   return added;
@@ -115,17 +114,16 @@ async function run() {
           kind: result.meta.kind,
           bodyFontSize: result.meta.bodyFontSize,
           blockCount: result.blocks.length,
-          cover: result.cover,
+          coverType: result.cover.type || 'image/jpeg',
           addedAt: Date.now(),
           progress: 0,
           position: 0,
         };
-        await db.transaction('rw', [db.papers, db.contents, db.images, db.files], async () => {
-          await db.papers.add(paper);
-          await db.contents.add({ paperId, blocks: result.blocks });
-          await db.images.bulkAdd(result.images.map((im) => ({ ...im, paperId })));
-          await db.files.add({ paperId, blob: new Blob([data], { type: 'application/pdf' }) });
-        });
+        patch(job.id, { message: 'Saving to your library', progress: 1 });
+        await savePaper(
+          { paper, blocks: result.blocks, cover: result.cover, file: new Blob([data], { type: 'application/pdf' }), images: result.images },
+          controller.signal,
+        );
         patch(job.id, { status: 'done', progress: 1, message: 'Added to your library', paperId });
       } catch (err) {
         const aborted = controller.signal.aborted || (err as Error)?.name === 'AbortError';

@@ -19,13 +19,15 @@ tablets and desktops, installs to the home screen, and keeps everything on your 
 - **Navigation**: contents with sections, figures and tables; position slider; minutes left;
   original page numbers; a view of the original PDF page for anything the reflow can't capture.
 - **Library**: covers, reading progress, "continue reading", search and sort.
-- **Private and offline**: papers are stored in the browser (IndexedDB). It's a PWA, so it can be
-  added to the home screen on iPad and iPhone and works offline once loaded.
+- **One library for all your devices**: a small server on your computer keeps the papers in a folder
+  (`~/PaperReader` by default) and serves the app on your network, so the iPad, the phone and the
+  laptop all see the same papers and reading positions.
 
 ## Layout
 
 ```
 apps/web               React + TypeScript + Vite app (Tailwind CSS v4 + Material UI v7)
+apps/server            Node server (no dependencies): serves the app and stores the library
 packages/pdf-ingest    The PDF to reading-blocks pipeline (pdf.js + Tesseract.js)
 fixtures               Sample papers (two-column, scanned, scanned spreads) and their generator
 e2e                    Playwright scripts that import the fixtures and take screenshots
@@ -37,18 +39,30 @@ Needs Node 20+ and pnpm.
 
 ```bash
 pnpm install
-pnpm dev          # http://localhost:5173 (also on your LAN, to try it on an iPad or phone)
-pnpm build        # production build in apps/web/dist (static files, host anywhere)
+pnpm start        # builds the app and serves it on http://papers.local:4300
+pnpm dev          # development: Vite with hot reload (run `pnpm serve` alongside for the library API)
 pnpm test         # unit tests for the layout engine
 ```
 
-The OCR engine, its English language data and the pdf.js fonts are copied from `node_modules`
-into `apps/web/public` by `apps/web/scripts/copy-assets.mjs` before `dev` and `build`, so nothing
-is fetched from a CDN.
+`pnpm start` prints the addresses it is reachable on. On a Mac it announces `papers.local` over
+Bonjour, so any iPad, iPhone or computer on the same Wi-Fi can open `http://papers.local:4300`
+(the Mac's own name, `http://<computer-name>.local:4300`, works too). It is plain http, meant for
+your home network only; there is no login.
 
-To try it on an iPad, run `pnpm dev`, open the "Network" URL Vite prints, then use Share →
-Add to Home Screen. For a permanent install, host `apps/web/dist` on any static host over HTTPS
-(GitHub Pages, Netlify, Cloudflare Pages, a NAS).
+| Setting           | Default        | What it does                                  |
+| ----------------- | -------------- | --------------------------------------------- |
+| `PORT`            | `4300`         | Port to listen on                             |
+| `PAPERS_DIR`      | `~/PaperReader`| Library folder (one sub-folder per paper)     |
+| `PAPERS_HOSTNAME` | `papers`       | Bonjour name to announce; empty turns it off  |
+
+Each paper folder holds `paper.json` (title, authors, reading position), `content.json` (the
+reflowed text), `images/`, `cover` and `original.pdf`. Removing a paper in the app moves its folder
+to `.trash` inside the library folder.
+
+PDF import (including OCR) still runs in the browser of the device you import from; the result is
+uploaded to the server. The OCR engine, its English language data and the pdf.js fonts are copied
+from `node_modules` into `apps/web/public` by `apps/web/scripts/copy-assets.mjs` before `dev` and
+`build`, so nothing is fetched from a CDN.
 
 ## How the import works
 
@@ -66,13 +80,13 @@ Add to Home Screen. For a permanent install, host `apps/web/dist` on any static 
 5. **Reading order and blocks**: lines are ordered column by column between full-width elements,
    display equations are detected, and lines are joined into paragraphs and headings. Captions are
    attached to their figures. Title, authors and abstract are taken from the first page.
-6. Figures are cropped from a high-resolution render and stored with the text in IndexedDB.
+6. Figures are cropped from a high-resolution render and uploaded with the text to the library server.
 
 ## Testing with the fixtures
 
 ```bash
 python3 fixtures/make_fixtures.py      # regenerate the sample PDFs (needs reportlab, pillow, pypdfium2)
-pnpm dev &
+pnpm start &
 node e2e/ingest-dump.mjs fixtures/two-column-paper.pdf /tmp/out   # print the extracted blocks
 node e2e/screens.mjs /tmp/screens                                  # phone / iPad screenshots
 ```

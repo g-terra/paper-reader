@@ -6,7 +6,7 @@ import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import ZoomInRounded from '@mui/icons-material/ZoomInRounded';
 import ZoomOutRounded from '@mui/icons-material/ZoomOutRounded';
 import { openPdf, renderPdfPage, type PDFDocumentProxy } from '@paper-reader/pdf-ingest';
-import { db, type PaperRecord } from '../lib/db';
+import { fileUrl, type PaperRecord } from '../lib/db';
 import { pageLabel } from './BlocksView';
 
 interface Props {
@@ -30,9 +30,9 @@ export function OriginalPageDialog({ paper, page, onChange, onClose }: Props) {
     if (!open || doc) return;
     let cancelled = false;
     (async () => {
-      const file = await db.files.get(paper.id);
-      if (!file) return setError('The original PDF is not stored for this paper.');
-      const d = await openPdf(file.blob);
+      const res = await fetch(fileUrl(paper.id));
+      if (!res.ok) return setError('The original PDF is not stored for this paper.');
+      const d = await openPdf(await res.blob());
       if (cancelled) void d.destroy();
       else setDoc(d);
     })().catch((e) => setError(String(e?.message ?? e)));
