@@ -23,6 +23,8 @@ export interface PageInput {
   gutters: number[];
   /** Regions decided before layout (e.g. unreadable OCR lines on scans). */
   presetRegions?: Region[];
+  /** A scanned page that came with its own OCR text layer: figures and tables are only pixels. */
+  scanTextLayer?: boolean;
 }
 
 export interface DocumentStats {
@@ -618,7 +620,10 @@ export function assembleBlocks(pages: { page: number; height: number; items: Flo
         continue;
       }
 
-      const caption = isCaptionStart(text);
+      // "... as shown in / Figure 3. Thus ..." continues a sentence; a caption starts fresh.
+      const continuesSentence =
+        !!prev && samePlace && open?.kind === 'paragraph' && open.role !== 'caption' && gapBefore < leading * 0.9 && !SENTENCE_END.test(prev.line.text) && looksLikeProse(prev.line, stats);
+      const caption = isCaptionStart(text) && !continuesSentence;
       let role: BlockRole =
         section === 'front' ? 'front' : section === 'abstract' ? 'abstract' : section === 'references' ? 'reference' : 'body';
       if (caption) role = 'caption';
@@ -851,4 +856,87 @@ const DATABASE_NOTICE = /^copyright of .{3,200} is the property of|may not be co
 /** Drops the copyright notice that article databases (EBSCO) append to the last page. */
 export function dropDatabaseNotice(blocks: Block[]): Block[] {
   return blocks.filter((b) => !((b.kind === 'paragraph' || b.kind === 'heading') && DATABASE_NOTICE.test(b.text)));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Scans with a text layer
+
+const TABLE_CAPTION = /^tab(?:le|\.)\s*[\dIVX]+\b/i;
+const FIGURE_CAPTION = /^fig(?:ure|\.)\s*[\dIVX]+\b/i;
+
+/**
+ * On a scan with a text layer, tables are text, so the ink finder cannot see them, and a figure's
+ * own text ("Given: ...", labels) sits between the drawing and its caption. Anchors on captions:
+ * a table runs from its caption down to where running prose resumes; a figure grows down over the
+ * short lines between it and its caption. Lines that become part of a picture leave the text.
+ */
+export function captionRegions(page: PageInput, stats: DocumentStats, makeId: () => string): void {
+  const { bodySize, leading } = stats;
+  const lines = [...page.lines].sort((a, b) => a.y0 - b.y0);
+  const column = (l: Line): [number, number] => {
+    if (l.x1 - l.x0 > page.width * 0.6 || !page.gutters.length) return [Math.min(l.x0, page.width * 0.08), Math.max(l.x1, page.width * 0.92)];
+    const cx = (l.x0 + l.x1) / 2;
+    const left = Math.max(0, ...page.gutters.filter((g) => g < cx));
+    const right = Math.min(page.width, ...page.gutters.filter((g) => g > cx));
+    return [left, right];
+  };
+  const inColumn = (l: Line, [a, b]: [number, number]) => Math.min(l.x1, b) - Math.max(l.x0, a) > (l.x1 - l.x0) * 0.5;
+  const isProse = (l: Line, [a, b]: [number, number]) => l.size >= bodySize * 0.92 && l.x1 - l.x0 >= (b - a) * 0.7 && looksLikeProse(l, stats);
+  const taken = new Set<Line>();
+  const regions: Region[] = [];
+
+  for (const cap of lines) {
+    if (taken.has(cap)) continue;
+    const col = column(cap);
+    const m = TABLE_CAPTION.exec(cap.text);
+    // "Table 2 is assuming ..." or a "Table 1." that ends a sentence of running text is not a caption.
+    if (m && !/^[\s.:]*($|\p{Lu})/u.test(cap.text.slice(m[0].length))) continue;
+    // "... the hand simulation of / Table 1." continues the line above; a caption doesn't.
+    const above = m && lines.filter((l) => l.y1 <= cap.y0 + 1 && cap.y0 - l.y1 < leading && inColumn(l, col)).pop();
+    if (above && !/[.!?:]["”’')\]]*$/.test(above.text) && !isCaptionStart(above.text)) continue;
+    if (m && !isProse(cap, col)) {
+      const below = (range: [number, number]) =>
+        lines.filter((l) => l.y0 > cap.y0 + 1 && l !== cap && !taken.has(l) && inColumn(l, range));
+      // The title is the line right under "Table 1" when it is short; it joins the caption.
+      const first = below(col)[0];
+      let title: Line | undefined;
+      if (first && first.y0 - cap.y1 < leading && first.text.length < 120 && !isProse(first, col) && cap.text.length < 14) title = first;
+      // A table can span both columns even when its caption sits in one.
+      let range = col;
+      const start = (title ?? cap).y1;
+      const nearby = lines.filter((l) => l.y0 > start - 1 && l.y0 < start + leading * 3);
+      if (page.gutters.length && nearby.some((l) => !inColumn(l, col)) && !nearby.some((l) => isProse(l, column(l)))) range = [0, page.width];
+      const body: Line[] = [];
+      let lastY = start;
+      for (const l of below(range)) {
+        if (l === title) continue;
+        if (isCaptionStart(l.text) || l.y0 - lastY > leading * 4) break;
+        if (isProse(l, column(l))) break;
+        body.push(l);
+        lastY = Math.max(lastY, l.y1);
+      }
+      if (body.length < 2) continue;
+      const num = m[0].replace(/[.:]$/, '');
+      cap.text = `${num}.${title ? ` ${title.text}` : cap.text.slice(m[0].length).replace(/^[\s.:]*/, ' ').trimEnd()}`;
+      if (title) taken.add(title);
+      const rect = body.reduce<Rect>((r, l) => union(r, l as Rect), { ...(body[0] as Rect) });
+      body.forEach((l) => taken.add(l));
+      regions.push({ id: makeId(), page: page.page, rect: expand(rect, 3), variant: 'table', graphic: true });
+    } else if (FIGURE_CAPTION.test(cap.text)) {
+      // The nearest picture above the caption, in the same column.
+      let best = -1;
+      page.graphics.forEach((g, i) => {
+        if (g.y1 > cap.y0 + 2 || Math.min(g.x1, col[1]) - Math.max(g.x0, col[0]) <= 0) return;
+        if (best < 0 || g.y1 > page.graphics[best].y1) best = i;
+      });
+      if (best < 0) continue;
+      const g = page.graphics[best];
+      const between = lines.filter((l) => !taken.has(l) && l.y0 >= g.y1 - 2 && l.y1 <= cap.y0 + 2 && inColumn(l, col));
+      if (!between.length || between.length > 10 || between.some((l) => isProse(l, col))) continue;
+      between.forEach((l) => taken.add(l));
+      page.graphics[best] = between.reduce<Rect>((r, l) => union(r, l as Rect), g);
+    }
+  }
+  page.lines = page.lines.filter((l) => !taken.has(l));
+  page.presetRegions = [...(page.presetRegions ?? []), ...regions];
 }
