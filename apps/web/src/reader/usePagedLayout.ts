@@ -17,21 +17,41 @@ interface Options {
   spread: boolean;
   margin: 'narrow' | 'normal' | 'wide';
   fontSize: number;
+  lineHeight: number;
 }
 
-export function computeLayout(vw: number, vh: number, o: Pick<Options, 'spread' | 'margin' | 'fontSize'>): PagedLayout & { padX: number; padY: number } {
+export function computeLayout(
+  vw: number,
+  vh: number,
+  o: Pick<Options, 'spread' | 'margin' | 'fontSize'> & { lineHeight?: number },
+): PagedLayout & { padX: number; padY: number } {
   const phone = vw < 640;
   const base = { narrow: 0.6, normal: 1.0, wide: 1.6 }[o.margin];
   let padX = Math.round((phone ? 18 : 40) * base);
-  const padY = phone ? 14 : 24;
   const columns: 1 | 2 = o.spread && vw >= 900 && vw > vh * 1.05 ? 2 : 1;
-  const gap = columns === 2 ? Math.max(48, padX * 2) : padX * 2;
+  let gap = columns === 2 ? Math.max(48, padX * 2) : padX * 2;
   // Keep lines to a comfortable measure (roughly 70 characters).
   const maxMeasure = o.fontSize * 36;
   const measure = (vw - padX * 2 - (columns - 1) * gap) / columns;
-  if (measure > maxMeasure) padX += Math.floor(((measure - maxMeasure) * columns) / 2);
+  if (measure > maxMeasure) {
+    if (columns === 1) {
+      padX = Math.floor((vw - maxMeasure) / 2);
+      gap = padX * 2;
+    } else {
+      // Share the spare room between the side margins and the gutter. The gutter must be at least
+      // as wide as a side margin, or the next page would peek in at the right edge.
+      padX = Math.floor((vw - maxMeasure * 2 - 8) / 3);
+      gap = padX + 8;
+    }
+  }
   const width = Math.max(200, vw - padX * 2);
-  const height = Math.max(200, vh - padY * 2);
+  // Make the page a whole number of body lines tall, so the last line on a page is never cut and
+  // the text sits in the middle of the screen with even margins above and below.
+  const minPadY = phone ? 14 : 24;
+  const line = o.fontSize * (o.lineHeight ?? 1.6);
+  const avail = vh - minPadY * 2;
+  const height = Math.max(200, line > 0 ? Math.floor(avail / line) * line : avail);
+  const padY = Math.max(minPadY, Math.floor((vh - height) / 2));
   return { width, height, gap, columns, stride: width + gap, padX, padY };
 }
 

@@ -25,6 +25,8 @@ export interface ReaderSettings {
   /** Invert figures in dark themes so diagrams are not glaring white boxes. */
   invertFigures: boolean;
   showPageMarks: boolean;
+  /** Show the chapter and reading progress under the text while reading. */
+  showProgress: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReaderSettings = {
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   spread: true,
   invertFigures: false,
   showPageMarks: true,
+  showProgress: false,
 };
 
 const KEY = 'paper-reader:settings';
