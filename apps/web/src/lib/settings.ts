@@ -44,11 +44,22 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
 };
 
 const KEY = 'paper-reader:settings';
+const PAGED_ONCE = 'paper-reader:paged-default-v1';
 
 function load(): ReaderSettings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } as ReaderSettings;
+      // Pages became the main way to read (sheets, page numbers). Switch every device to it once;
+      // Scroll can still be picked again under Text and theme.
+      if (!localStorage.getItem(PAGED_ONCE)) {
+        saved.mode = 'paged';
+        localStorage.setItem(PAGED_ONCE, '1');
+        localStorage.setItem(KEY, JSON.stringify(saved));
+      }
+      return saved;
+    }
   } catch {
     // Storage unavailable (private mode): use defaults.
   }
