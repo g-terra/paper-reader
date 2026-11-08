@@ -20,8 +20,10 @@ export interface ReaderSettings {
   margin: 'narrow' | 'normal' | 'wide';
   justify: boolean;
   mode: 'paged' | 'scroll';
-  /** Show two pages side by side on wide screens (iPad landscape, desktop). */
-  spread: boolean;
+  /** Pages side by side on one screen; 'auto' shows two on wide landscape screens. */
+  pagesOnScreen: 'auto' | 1 | 2 | 3;
+  /** Old setting, replaced by pagesOnScreen (false meant one page). */
+  spread?: boolean;
   /** Invert figures in dark themes so diagrams are not glaring white boxes. */
   invertFigures: boolean;
   showPageMarks: boolean;
@@ -37,7 +39,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   margin: 'normal',
   justify: true,
   mode: 'paged',
-  spread: true,
+  pagesOnScreen: 'auto',
   invertFigures: false,
   showPageMarks: true,
   showProgress: false,
@@ -50,7 +52,9 @@ function load(): ReaderSettings {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
-      const saved = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } as ReaderSettings;
+      const parsed = JSON.parse(raw) as Partial<ReaderSettings>;
+      const saved = { ...DEFAULT_SETTINGS, ...parsed } as ReaderSettings;
+      if (parsed.pagesOnScreen === undefined && parsed.spread === false) saved.pagesOnScreen = 1;
       // Pages became the main way to read (sheets, page numbers). Switch every device to it once;
       // Scroll can still be picked again under Text and theme.
       if (!localStorage.getItem(PAGED_ONCE)) {

@@ -103,6 +103,14 @@ export function AppearanceControls({ compact = false }: { compact?: boolean }) {
             </ToggleButton>
           </ToggleButtonGroup>
         </Row>
+        <Row label="Pages on screen">
+          <ToggleButtonGroup size="small" exclusive fullWidth value={s.pagesOnScreen} onChange={(_, v) => v && set({ pagesOnScreen: v, mode: 'paged' })}>
+            <ToggleButton value="auto">Auto</ToggleButton>
+            <ToggleButton value={1}>1</ToggleButton>
+            <ToggleButton value={2}>2</ToggleButton>
+            <ToggleButton value={3}>3</ToggleButton>
+          </ToggleButtonGroup>
+        </Row>
         <Row label="Alignment">
           <ToggleButtonGroup size="small" exclusive fullWidth value={s.justify} onChange={(_, v) => v !== null && set({ justify: v })}>
             <ToggleButton value={true}>
@@ -116,7 +124,6 @@ export function AppearanceControls({ compact = false }: { compact?: boolean }) {
       </div>
 
       <Box className="mt-1 divide-y divide-line border-t border-line">
-        <Toggle label="Two pages side by side on wide screens" checked={s.spread} onChange={(v) => set({ spread: v })} />
         <Toggle label="Show chapter and progress under the page" checked={s.showProgress} onChange={(v) => set({ showProgress: v })} />
         <Toggle label="Show original page numbers" checked={s.showPageMarks} onChange={(v) => set({ showPageMarks: v })} />
         <Tooltip title="Only applies to the Dusk and Night themes" placement="top-start">

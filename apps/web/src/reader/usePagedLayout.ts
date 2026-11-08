@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 export interface PagedLayout {
-  /** Width of one screen of text (one or two columns), in px. */
+  /** Width of one screen of text (all its pages), in px. */
   width: number;
   height: number;
   gap: number;
-  columns: 1 | 2;
+  /** Pages side by side on one screen. */
+  columns: number;
   /** Horizontal distance between two screens. */
   stride: number;
   /** Width of one page (column) of text and the distance between two pages. */
@@ -26,7 +27,8 @@ interface Options {
   enabled: boolean;
   /** Changes to any of these values trigger a re-layout. */
   deps: unknown[];
-  spread: boolean;
+  /** Pages side by side: 'auto' picks two on wide landscape screens, one otherwise. */
+  pagesOnScreen: 'auto' | 1 | 2 | 3;
   margin: 'narrow' | 'normal' | 'wide';
   fontSize: number;
   lineHeight: number;
@@ -35,13 +37,20 @@ interface Options {
 export function computeLayout(
   vw: number,
   vh: number,
-  o: Pick<Options, 'spread' | 'margin' | 'fontSize'> & { lineHeight?: number },
+  o: Pick<Options, 'pagesOnScreen' | 'margin' | 'fontSize'> & { lineHeight?: number },
 ): PagedLayout {
   const phone = vw < 640;
   const base = { narrow: 0.6, normal: 1.0, wide: 1.6 }[o.margin];
   let padX = Math.round((phone ? 18 : 40) * base);
-  const columns: 1 | 2 = o.spread && vw >= 900 && vw > vh * 1.05 ? 2 : 1;
-  let gap = columns === 2 ? Math.max(48, padX * 2) : padX * 2;
+  let columns: number;
+  if (o.pagesOnScreen === 'auto') columns = vw >= 900 && vw > vh * 1.05 ? 2 : 1;
+  else {
+    // As many as asked for, as long as each page still fits about 30 characters a line.
+    const minMeasure = o.fontSize * 15;
+    columns = o.pagesOnScreen;
+    while (columns > 1 && (vw - padX * 2 - (columns - 1) * Math.max(48, padX * 2)) / columns < minMeasure) columns--;
+  }
+  let gap = columns > 1 ? Math.max(48, padX * 2) : padX * 2;
   // Keep lines to a comfortable measure (roughly 70 characters).
   const maxMeasure = o.fontSize * 36;
   const measure = (vw - padX * 2 - (columns - 1) * gap) / columns;
@@ -50,9 +59,9 @@ export function computeLayout(
       padX = Math.floor((vw - maxMeasure) / 2);
       gap = padX * 2;
     } else {
-      // Share the spare room between the side margins and the gutter. The gutter must be at least
-      // as wide as a side margin (plus room for the page sheet), or the next page would peek in.
-      padX = Math.floor((vw - maxMeasure * 2 - 64) / 3);
+      // Share the spare room between the side margins and the gutters. A gutter must be wider than
+      // a side margin (plus room for the page sheet), or the next screen would peek in.
+      padX = Math.floor((vw - maxMeasure * columns - (columns - 1) * 64) / (columns + 1));
       gap = padX + 64;
     }
   }
