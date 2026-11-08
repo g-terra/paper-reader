@@ -43,7 +43,8 @@
           show(String((e.reason && (e.reason.stack || e.reason.message)) || e.reason));
         });
         setTimeout(function () {
-          show('The app did not start within 15 seconds.');
+          var root = document.getElementById('root');
+          if (root && !root.childElementCount) show('The app did not start within 15 seconds.');
         }, 15000);
       })();
     </script>
