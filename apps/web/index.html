@@ -21,7 +21,12 @@
     <!-- If the app fails to start (old browser, network hiccup), say why instead of showing a blank page. -->
     <script>
       (function () {
+        var reported = 0;
         function show(msg) {
+          // Report every error (at most 20 a page) so problems on other devices show up in the server log.
+          try {
+            if (reported++ < 20 && navigator.sendBeacon) navigator.sendBeacon('./api/client-error', location.hash + ' ' + msg + ' | ' + navigator.userAgent);
+          } catch (e) {}
           var root = document.getElementById('root');
           if (!root || root.childElementCount) return;
           root.innerHTML =
@@ -30,9 +35,6 @@
             '<pre style="white-space:pre-wrap;background:#f3ead8;padding:12px;border-radius:8px;font-size:12px"></pre>' +
             '<button onclick="location.reload()" style="font-size:15px;padding:8px 16px;border-radius:8px;border:0;background:#9a5b2b;color:#fff">Try again</button></div>';
           root.querySelector('pre').textContent = msg + '\n\n' + navigator.userAgent;
-          try {
-            navigator.sendBeacon && navigator.sendBeacon('./api/client-error', msg + ' | ' + navigator.userAgent);
-          } catch (e) {}
         }
         window.addEventListener('error', function (e) {
           show(String((e.error && e.error.stack) || e.message || 'Script failed to load'));

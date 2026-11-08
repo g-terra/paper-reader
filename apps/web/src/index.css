@@ -69,6 +69,45 @@
   letter-spacing: 0.02em;
 }
 
+.reader-nav {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.reader-nav button {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--r-muted);
+  width: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.55;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.reader-nav button:disabled {
+  opacity: 0.15;
+  cursor: default;
+}
+.reader-nav button.reader-nav-menu {
+  width: 140px;
+  opacity: 0;
+}
+@media (hover: hover) {
+  .reader-nav button:not(:disabled):hover {
+    opacity: 0.9;
+  }
+}
+
 .reader-content {
   font-family: var(--reader-font);
   font-size: var(--reader-size);
