@@ -39,6 +39,34 @@
   touch-action: pan-y pinch-zoom;
 }
 
+/* Pages drawn as sheets of paper on a slightly darker desk (tablets and desktops). */
+.reader-desk {
+  position: absolute;
+  inset: 0;
+  background: var(--r-fg);
+  opacity: 0.05;
+  pointer-events: none;
+}
+.reader-sheet {
+  position: absolute;
+  background: var(--r-bg);
+  border-radius: 6px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.08),
+    0 8px 28px rgb(0 0 0 / 0.1);
+}
+.reader-page-number {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--r-muted);
+  letter-spacing: 0.02em;
+}
+
 .reader-content {
   font-family: var(--reader-font);
   font-size: var(--reader-size);

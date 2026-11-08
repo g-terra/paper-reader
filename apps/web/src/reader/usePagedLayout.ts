@@ -8,6 +8,18 @@ export interface PagedLayout {
   columns: 1 | 2;
   /** Horizontal distance between two screens. */
   stride: number;
+  /** Width of one page (column) of text and the distance between two pages. */
+  colW: number;
+  colStride: number;
+  padX: number;
+  padTop: number;
+  padBottom: number;
+  /** Draw each page as a sheet of paper (tablets and desktops). */
+  sheets: boolean;
+  sheetPadX: number;
+  /** Space between a sheet and the edge of the screen. */
+  sheetInset: number;
+  numberHeight: number;
 }
 
 interface Options {
@@ -24,7 +36,7 @@ export function computeLayout(
   vw: number,
   vh: number,
   o: Pick<Options, 'spread' | 'margin' | 'fontSize'> & { lineHeight?: number },
-): PagedLayout & { padX: number; padY: number } {
+): PagedLayout {
   const phone = vw < 640;
   const base = { narrow: 0.6, normal: 1.0, wide: 1.6 }[o.margin];
   let padX = Math.round((phone ? 18 : 40) * base);
@@ -39,20 +51,47 @@ export function computeLayout(
       gap = padX * 2;
     } else {
       // Share the spare room between the side margins and the gutter. The gutter must be at least
-      // as wide as a side margin, or the next page would peek in at the right edge.
-      padX = Math.floor((vw - maxMeasure * 2 - 8) / 3);
-      gap = padX + 8;
+      // as wide as a side margin (plus room for the page sheet), or the next page would peek in.
+      padX = Math.floor((vw - maxMeasure * 2 - 64) / 3);
+      gap = padX + 64;
     }
   }
   const width = Math.max(200, vw - padX * 2);
-  // Make the page a whole number of body lines tall, so the last line on a page is never cut and
-  // the text sits in the middle of the screen with even margins above and below.
-  const minPadY = phone ? 14 : 24;
+  const colW = (width - (columns - 1) * gap) / columns;
+
+  // On a tablet or desktop each page is drawn as a sheet of paper; on a phone the screen is the page.
+  // A sheet must not reach into the screen from the neighbouring pages either.
+  const sheetPadX = Math.floor(Math.min(padX - 12, gap / 2 - 10, gap - padX - 8, 44));
+  const sheets = !phone && sheetPadX >= 16;
+  const OUTSIDE = 16; // space between a sheet and the edge of the screen
+  const NUMBER = 26; // room for the page number under the text
+  const minTop = sheets ? OUTSIDE + 30 : phone ? 14 : 24;
+  const minBottom = sheets ? OUTSIDE + NUMBER + 14 : NUMBER + (phone ? 8 : 14);
+
+  // Make the page a whole number of body lines tall, so the last line on a page is never cut, and
+  // share what is left over evenly above and below.
   const line = o.fontSize * (o.lineHeight ?? 1.6);
-  const avail = vh - minPadY * 2;
+  const avail = vh - minTop - minBottom;
   const height = Math.max(200, line > 0 ? Math.floor(avail / line) * line : avail);
-  const padY = Math.max(minPadY, Math.floor((vh - height) / 2));
-  return { width, height, gap, columns, stride: width + gap, padX, padY };
+  const extra = Math.max(0, vh - minTop - minBottom - height);
+  const padTop = minTop + Math.floor(extra / 2);
+  const padBottom = vh - padTop - height;
+  return {
+    width,
+    height,
+    gap,
+    columns,
+    stride: width + gap,
+    colW,
+    colStride: colW + gap,
+    padX,
+    padTop,
+    padBottom,
+    sheets,
+    sheetPadX,
+    sheetInset: OUTSIDE,
+    numberHeight: NUMBER,
+  };
 }
 
 /**
@@ -62,6 +101,7 @@ export function computeLayout(
 export function usePagedLayout(viewport: React.RefObject<HTMLDivElement | null>, content: React.RefObject<HTMLDivElement | null>, o: Options) {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [pages, setPages] = useState(1);
+  const [bookPages, setBookPages] = useState(1);
   const [version, setVersion] = useState(0);
   const relayoutTimer = useRef<number | undefined>(undefined);
 
@@ -85,8 +125,9 @@ export function usePagedLayout(viewport: React.RefObject<HTMLDivElement | null>,
     const left = sentinel.getBoundingClientRect().left - c.getBoundingClientRect().left;
     const n = Math.max(1, Math.floor(left / layout.stride + 1e-3) + 1);
     setPages(n);
+    setBookPages(Math.max(1, Math.floor(left / layout.colStride + 1e-3) + 1));
     setVersion((v) => v + 1);
-  }, [content, layout.stride, o.enabled]);
+  }, [content, layout.stride, layout.colStride, o.enabled]);
 
   useLayoutEffect(() => {
     countPages();
@@ -150,5 +191,5 @@ export function usePagedLayout(viewport: React.RefObject<HTMLDivElement | null>,
     [content, layout.stride],
   );
 
-  return { layout, pages, version, pageOfBlock, firstBlockOnPage, scheduleRelayout, ready: size.w > 0 };
+  return { layout, pages, bookPages, version, pageOfBlock, firstBlockOnPage, scheduleRelayout, ready: size.w > 0 };
 }
