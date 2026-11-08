@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AppBar, Button, IconButton, Slide, Slider, Toolbar, Tooltip } from '@mui/material';
+import { AppBar, Button, IconButton, Slide, Slider, Snackbar, Toolbar, Tooltip } from '@mui/material';
+import FullscreenRounded from '@mui/icons-material/FullscreenRounded';
+import FullscreenExitRounded from '@mui/icons-material/FullscreenExitRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import TocRounded from '@mui/icons-material/TocRounded';
 import TextFieldsRounded from '@mui/icons-material/TextFieldsRounded';
@@ -93,6 +95,36 @@ function Reader({ paper, blocks, images }: Loaded) {
   const [figure, setFigure] = useState<{ src: string; caption?: string } | null>(null);
   const [original, setOriginal] = useState<number | null>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
+  const [fullscreen, setFullscreen] = useState(isFullscreen());
+  const [fullscreenHelp, setFullscreenHelp] = useState(false);
+  // Opened from the home screen: already full screen, nothing to toggle.
+  const standalone = useMemo(() => Boolean(window.matchMedia?.('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone), []);
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(isFullscreen());
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+
+  const toggleFullscreen = () => {
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    const doc = document as Document & { webkitExitFullscreen?: () => void };
+    if (isFullscreen()) {
+      if (document.exitFullscreen) void document.exitFullscreen().catch(() => {});
+      else doc.webkitExitFullscreen?.();
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => setFullscreenHelp(true));
+    } else if (el.webkitRequestFullscreen) {
+      el.webkitRequestFullscreen();
+    } else {
+      // iPhone and older iPads can't make a web page full screen; an app on the home screen can.
+      setFullscreenHelp(true);
+    }
+  };
 
   const font = FONTS[settings.font];
   const { layout, pages, bookPages, version, pageOfBlock, firstBlockOnPage, scheduleRelayout, ready } = usePagedLayout(viewport, content, {
@@ -385,7 +417,21 @@ function Reader({ paper, blocks, images }: Loaded) {
               </div>
             </div>
           </div>
-        ) : (
+        ) : null}
+        {paged && (
+          // Always-visible controls. Real buttons, so they work even where a browser won't report a
+          // tap on plain text (older iPads).
+          <div className="reader-nav" style={{ height: Math.max(44, layout.padBottom) }}>
+            <button type="button" aria-label="Previous page" disabled={page === 0} onClick={prev}>
+              <ChevronLeftRounded />
+            </button>
+            <button type="button" aria-label="Show controls" className="reader-nav-menu" onClick={() => setChrome((c) => !c)} />
+            <button type="button" aria-label="Next page" disabled={page >= pages - 1} onClick={next}>
+              <ChevronRightRounded />
+            </button>
+          </div>
+        )}
+        {paged ? null : (
           <div ref={scroller} className="h-full overflow-y-auto overscroll-contain" onScroll={onScroll} onClick={onTap}>
             <div ref={viewport} className="mx-auto" style={{ maxWidth: settings.fontSize * 36 + layout.padX * 2, padding: `${layout.padTop + 56}px ${layout.padX}px 120px` }}>
               <div ref={content} className="reader-content">
@@ -430,6 +476,13 @@ function Reader({ paper, blocks, images }: Loaded) {
                 <ArticleOutlined />
               </IconButton>
             </Tooltip>
+            {!standalone && (
+              <Tooltip title={fullscreen ? 'Exit full screen' : 'Full screen'}>
+                <IconButton onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}>
+                  {fullscreen ? <FullscreenExitRounded /> : <FullscreenRounded />}
+                </IconButton>
+              </Tooltip>
+            )}
             <Tooltip title="Text and theme">
               <IconButton edge="end" onClick={() => setPanel('appearance')} aria-label="Text and theme">
                 <TextFieldsRounded />
@@ -486,8 +539,21 @@ function Reader({ paper, blocks, images }: Loaded) {
       <Sheet open={panel === 'appearance'} onClose={() => setPanel(null)} title="Text and theme">
         <AppearanceControls compact />
       </Sheet>
+      <Snackbar
+        open={fullscreenHelp}
+        onClose={() => setFullscreenHelp(false)}
+        autoHideDuration={12000}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        message="This browser can't go full screen. Open the reader in Safari, tap Share › Add to Home Screen, then open Papers from the home screen: it runs full screen."
+      />
       <FigureDialog figure={figure} onClose={() => setFigure(null)} />
       <OriginalPageDialog paper={paper} page={original} onChange={setOriginal} onClose={() => setOriginal(null)} />
     </div>
   );
+}
+
+function isFullscreen() {
+  if (typeof document === 'undefined') return false;
+  const doc = document as Document & { webkitFullscreenElement?: Element | null };
+  return Boolean(document.fullscreenElement ?? doc.webkitFullscreenElement);
 }
