@@ -132,11 +132,13 @@ export function usePagedLayout(viewport: React.RefObject<HTMLDivElement | null>,
     const sentinel = c.querySelector<HTMLElement>('[data-end]');
     if (!sentinel) return;
     const left = sentinel.getBoundingClientRect().left - c.getBoundingClientRect().left;
-    const n = Math.max(1, Math.floor(left / layout.stride + 1e-3) + 1);
+    // Also count the overflow columns directly, in case the browser misplaces the end marker.
+    const right = Math.max(left, c.scrollWidth - layout.colW);
+    const n = Math.max(1, Math.floor(right / layout.stride + 1e-3) + 1);
     setPages(n);
-    setBookPages(Math.max(1, Math.floor(left / layout.colStride + 1e-3) + 1));
+    setBookPages(Math.max(1, Math.floor(right / layout.colStride + 1e-3) + 1));
     setVersion((v) => v + 1);
-  }, [content, layout.stride, layout.colStride, o.enabled]);
+  }, [content, layout.stride, layout.colStride, layout.colW, o.enabled]);
 
   useLayoutEffect(() => {
     countPages();

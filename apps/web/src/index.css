@@ -36,7 +36,9 @@
 .reader-viewport {
   position: relative;
   overflow: hidden;
-  touch-action: pan-y pinch-zoom;
+  /* Plain pan-y: Safari on iPadOS 15 drops the whole rule if it sees pinch-zoom, and then takes
+     horizontal swipes for itself. */
+  touch-action: pan-y;
 }
 
 /* Pages drawn as sheets of paper on a slightly darker desk (tablets and desktops). */
