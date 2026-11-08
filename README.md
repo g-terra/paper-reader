@@ -50,6 +50,13 @@ To try it on an iPad, run `pnpm dev`, open the "Network" URL Vite prints, then u
 Add to Home Screen. For a permanent install, host `apps/web/dist` on any static host over HTTPS
 (GitHub Pages, Netlify, Cloudflare Pages, a NAS).
 
+## Live version
+
+Every push to `main` is built and published to GitHub Pages by
+`.github/workflows/deploy-pages.yml`: https://g-terra.github.io/paper-reader/
+
+One-time setup: in the repository's Settings → Pages, set **Source** to **GitHub Actions**.
+
 ## How the import works
 
 1. **Per page**, pdf.js gives the text runs (with font, size and position) and the drawing
