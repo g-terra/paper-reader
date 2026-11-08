@@ -30,6 +30,8 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,mjs,css,html,png,svg,woff2}'],
         globIgnores: ['ocr/**'],
+        // The library comes from the server on every visit; never answer /api with a cached page.
+        navigateFallbackDenylist: [/^\/api\//],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         runtimeCaching: [
           {
@@ -48,6 +50,8 @@ export default defineConfig({
     }),
   ],
   worker: { format: 'es' },
+  // In development the library still comes from the server (pnpm serve), on its fixed port.
+  server: { proxy: { '/api': 'http://localhost:4300' } },
   build: { target: 'es2020', chunkSizeWarningLimit: 3000 },
   optimizeDeps: { exclude: ['pdfjs-dist'] },
 });

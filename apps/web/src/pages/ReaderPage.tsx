@@ -8,7 +8,7 @@ import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import ArticleOutlined from '@mui/icons-material/ArticleOutlined';
 import type { Block } from '@paper-reader/pdf-ingest';
-import { db, type PaperRecord } from '../lib/db';
+import { getContent, getPaper, imageUrl, updatePaper, type PaperRecord } from '../lib/db';
 import { FONTS, useSettings } from '../lib/settings';
 import { BlocksView, pageLabel } from '../reader/BlocksView';
 import { usePagedLayout } from '../reader/usePagedLayout';
@@ -30,38 +30,37 @@ export function ReaderPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<Loaded | null | undefined>(undefined);
+  const [error, setError] = useState<string>();
 
   useEffect(() => {
-    let urls: string[] = [];
     let cancelled = false;
     (async () => {
-      const paper = await db.papers.get(id);
-      const content = await db.contents.get(id);
-      if (!paper || !content) {
-        if (!cancelled) setData(null);
-        return;
-      }
-      const imgs = await db.images.where('paperId').equals(id).toArray();
+      const paper = await getPaper(id);
+      const blocks = paper ? await getContent(id) : null;
+      if (cancelled) return;
+      if (!paper || !blocks) return setData(null);
       const images = new Map<string, string>();
-      for (const im of imgs) {
-        const u = URL.createObjectURL(im.blob);
-        urls.push(u);
-        images.set(im.id, u);
-      }
-      if (cancelled) {
-        urls.forEach(URL.revokeObjectURL);
-        return;
-      }
-      await db.papers.update(id, { lastOpenedAt: Date.now() });
-      setData({ paper, blocks: content.blocks, images });
-    })();
+      for (const b of blocks) if (b.kind === 'figure') images.set(b.imageId, imageUrl(id, b.imageId));
+      void updatePaper(id, { lastOpenedAt: Date.now() }).catch(() => {});
+      setData({ paper, blocks, images });
+    })().catch((e) => !cancelled && setError(String((e as Error)?.message ?? e)));
     return () => {
       cancelled = true;
-      urls.forEach(URL.revokeObjectURL);
-      urls = [];
     };
   }, [id]);
 
+  if (error)
+    return (
+      <div className="grid h-full place-items-center p-6 text-center">
+        <div>
+          <div className="font-serif text-xl font-semibold">Couldn't open this paper</div>
+          <div className="mt-2 text-sm text-muted">Is the reader still running on your Mac? ({error})</div>
+          <Button sx={{ mt: 2 }} variant="contained" onClick={() => window.location.reload()}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
   if (data === undefined) return <div className="grid h-full place-items-center text-muted">Opening…</div>;
   if (data === null)
     return (
@@ -190,7 +189,7 @@ function Reader({ paper, blocks, images }: Loaded) {
   const progress = paged ? (pages > 1 ? page / (pages - 1) : 1) : scrollProgress;
   useEffect(() => {
     const t = window.setTimeout(() => {
-      void db.papers.update(paper.id, { position: anchor.current, progress, lastOpenedAt: Date.now() });
+      void updatePaper(paper.id, { position: anchor.current, progress, lastOpenedAt: Date.now() }).catch(() => {});
     }, 400);
     return () => window.clearTimeout(t);
   }, [paper.id, progress, anchorState]);
