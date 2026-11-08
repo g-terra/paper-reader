@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import workerUrl from './pdf.worker?worker&url';
 import { configurePdfWorker, ingestPdf } from '@paper-reader/pdf-ingest';
 import { savePaper, type PaperRecord } from './db';
 import { makeId } from './id';
