@@ -197,7 +197,7 @@ function Reader({ paper, blocks, images }: Loaded) {
 
   // Swipe to turn pages.
   const pointer = useRef<{ x: number; y: number; t: number; id: number; horizontal?: boolean } | null>(null);
-  const suppressClick = useRef(false);
+  const suppressClickUntil = useRef(0);
   const onPointerDown = (e: React.PointerEvent) => {
     if (!paged || e.button !== 0) return;
     pointer.current = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
@@ -220,24 +220,31 @@ function Reader({ paper, blocks, images }: Loaded) {
   const onPointerUp = (e: React.PointerEvent) => {
     const p = pointer.current;
     pointer.current = null;
-    if (!p || !p.horizontal) return;
-    suppressClick.current = true;
+    if (!p || p.id !== e.pointerId) return;
     const dx = e.clientX - p.x;
-    const v = dx / Math.max(1, performance.now() - p.t);
+    const dt = performance.now() - p.t;
+    if (!p.horizontal) {
+      // Handle finger taps here instead of waiting for a click: Safari on iPad doesn't always send
+      // one for a tap on plain text.
+      if (e.type === 'pointerup' && e.pointerType !== 'mouse' && Math.hypot(dx, e.clientY - p.y) < 12 && dt < 600) {
+        suppressClickUntil.current = performance.now() + 800;
+        tapAt(e.clientX, e.currentTarget as HTMLElement);
+      }
+      return;
+    }
+    suppressClickUntil.current = performance.now() + 800;
+    const v = dx / Math.max(1, dt);
     setDragging(false);
     setDrag(0);
+    if (e.type === 'pointercancel') return;
     if (dx < -60 || v < -0.4) next();
     else if (dx > 60 || v > 0.4) prev();
   };
 
-  const onTap = (e: React.MouseEvent) => {
-    if (suppressClick.current) {
-      suppressClick.current = false;
-      return;
-    }
+  const tapAt = (clientX: number, target: HTMLElement) => {
     if (window.getSelection()?.toString()) return;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
+    const rect = target.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width;
     if (chrome) {
       setChrome(false);
       return;
@@ -245,6 +252,11 @@ function Reader({ paper, blocks, images }: Loaded) {
     if (paged && x < 0.28) prev();
     else if (paged && x > 0.72) next();
     else setChrome(true);
+  };
+
+  const onTap = (e: React.MouseEvent) => {
+    if (performance.now() < suppressClickUntil.current) return;
+    tapAt(e.clientX, e.currentTarget as HTMLElement);
   };
 
   const onScroll = () => {
