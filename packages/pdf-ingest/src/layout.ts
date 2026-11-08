@@ -420,6 +420,18 @@ function wordy(text: string): boolean {
   return letters >= chars.length * 0.65 && /\p{L}{3}/u.test(text) && !/[=\\]/.test(text);
 }
 
+function isCentered(line: Line, item: { colLeft: number; colRight: number }): boolean {
+  const mid = (item.colLeft + item.colRight) / 2;
+  return line.x0 > item.colLeft + line.size * 1.5 && line.x1 < item.colRight - line.size * 1.5 && Math.abs((line.x0 + line.x1) / 2 - mid) < line.size * 1.5;
+}
+
+/** "The Declarative Stage: Interpretive Procedures" yes; "Use of video" or "Expert" no. */
+function titleCase(text: string): boolean {
+  const words = text.split(' ').filter((w) => /^\p{L}{4,}/u.test(w));
+  if (text.split(' ').length < 2 || !words.length) return false;
+  return words.filter((w) => /^\p{Lu}/u.test(w)).length >= words.length * 0.7;
+}
+
 function headingInfo(line: Line, stats: DocumentStats, gapBefore: number, afterHeading = false, inFront = false): HeadingInfo | null {
   const text = fixSmallCaps(line.text.trim());
   if (text.length < 2 || text.length > 140 || !/\p{L}/u.test(text)) return null;
@@ -475,6 +487,8 @@ interface OpenParagraph {
   lines?: number;
   /** The first line is short and has no closing punctuation (a possible unstyled subheading). */
   headingCandidate?: boolean;
+  /** The candidate line is centred in its column (APA-style top-level heading). */
+  centered?: boolean;
   kind: 'paragraph' | 'heading';
   level: 2 | 3 | 4;
   role: BlockRole;
@@ -659,18 +673,25 @@ export function assembleBlocks(pages: { page: number; height: number; items: Flo
       // A one-line "paragraph" that is short, unpunctuated and followed by more text is a subheading
       // set in the body font ("Cognitive and Executive Functioning Benefits").
       const cur = open as OpenParagraph | null;
+      // A centred heading that wraps onto a second centred line ("The Declarative Stage: Interpretive / Procedures").
+      if (cur && cur.kind === 'paragraph' && cur.lines === 1 && cur.headingCandidate && cur.centered && samePlace && gapBefore < leading * 0.6 && isCentered(line, item) && !/[.:;,]$/.test(text) && text.split(' ').length <= 8) {
+        cur.text = `${cur.text} ${text}`;
+        cur.last = item;
+        continue;
+      }
       if (cur && cur.kind === 'paragraph' && cur.lines === 1 && cur.headingCandidate && cur.role === 'body') {
         cur.kind = 'heading';
-        cur.level = cur.last.line.bold > 0.7 || cur.last.line.size > bodySize * 1.05 ? 3 : 4;
+        cur.level = cur.centered ? 2 : cur.last.line.bold > 0.7 || cur.last.line.size > bodySize * 1.05 ? 3 : 4;
         startNew = true;
       }
       if (startNew) {
         close();
         const words = text.split(' ').length;
-        const short = line.x1 < item.colRight - line.size * 4 && line.x0 <= item.colLeft + line.size * 0.7;
+        const centered = isCentered(line, item) && titleCase(text) && !/^(\p{Lu}\.\s*){1,3}/u.test(text);
+        const short = (line.x1 < item.colRight - line.size * 4 && line.x0 <= item.colLeft + line.size * 0.7) || centered;
         const headingCandidate =
           role === 'body' && short && words >= 1 && words <= 12 && /^[\p{Lu}\d]/u.test(text) && !/[.,;:!?)\]]$/.test(text) && !/[=]/.test(text) && line.math < 0.2 && text.length >= 4 && wordy(text) && !/^(table|figure|fig\.?)\s*[\dIVX]+\.?$/i.test(text);
-        open = { kind: 'paragraph', level: 2, role, text, page: line.page, last: item, lines: 1, headingCandidate };
+        open = { kind: 'paragraph', level: 2, role, text, page: line.page, last: item, lines: 1, headingCandidate, centered };
       } else if (open) {
         open.text = joinLines(open.text, text);
         open.last = item;
