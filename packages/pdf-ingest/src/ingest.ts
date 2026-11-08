@@ -15,6 +15,7 @@ import {
   findEquations,
   findGraphicRegions,
   findTextTables,
+  captionRegions,
   readingOrder,
   removeRunningElements,
   type FlowItem,
@@ -122,6 +123,51 @@ interface ScanHalf {
   x0: number;
   x1: number;
   half?: 'left' | 'right';
+}
+
+function glyphBox(g: Glyph): Rect {
+  return { x0: g.x, y0: g.y - g.size * 0.8, x1: g.x + g.w, y1: g.y + g.size * 0.2 };
+}
+
+/**
+ * Finds figures and tables on a scanned page that has a text layer: renders the page, then looks
+ * for ink that the text layer's words do not explain. Returns rectangles in page points.
+ */
+async function findFiguresUnderTextLayer(pdfPage: PDFPageProxy, glyphs: Glyph[]): Promise<Rect[]> {
+  const scale = fitScale(pdfPage, 1600);
+  const canvas = await renderPage(pdfPage, scale);
+  try {
+    const gray = toGray(canvas);
+    // Text runs become word boxes in pixels. Words that are not plausible words (OCR noise from
+    // inside a figure) get a low confidence, so they don't punch holes in the figure.
+    const words: OcrWord[] = [];
+    for (const g of glyphs) {
+      const parts = g.str.split(/(\s+)/);
+      const total = Math.max(1, g.str.length);
+      const line = Math.round(g.y / Math.max(2, g.size * 0.6));
+      let offset = 0;
+      for (const part of parts) {
+        const len = part.length;
+        if (part.trim()) {
+          const x0 = g.x + (offset / total) * g.w;
+          const x1 = g.x + ((offset + len) / total) * g.w;
+          const letters = (part.match(/\p{L}/gu) ?? []).length;
+          const plausible = /\p{L}{3,}|^\d[\d.,]*$/u.test(part) && letters + (part.match(/\d/g) ?? []).length >= part.length * 0.6;
+          const box = { x0: x0 * scale, y0: (g.y - g.size * 0.8) * scale, x1: x1 * scale, y1: (g.y + g.size * 0.2) * scale };
+          words.push({ text: part, conf: plausible ? 90 : 30, box, baseline: g.y * scale, lineHeight: g.size * scale, line, lineConf: plausible ? 90 : 30 });
+        }
+        offset += len;
+      }
+    }
+    return findScanFigures(gray, words, { x0: 0, y0: 0, x1: canvas.width, y1: canvas.height }).map((f) => ({
+      x0: f.x0 / scale,
+      y0: f.y0 / scale,
+      x1: f.x1 / scale,
+      y1: f.y1 / scale,
+    }));
+  } finally {
+    releaseCanvas(canvas);
+  }
 }
 
 /** OCRs one scanned PDF page; returns one or two logical pages (spreads are split). */
@@ -246,8 +292,20 @@ export async function ingestPdf(data: ArrayBuffer | Uint8Array, opts: IngestOpti
       } else {
         report({ stage: 'reading', page: i, pageCount: n, fraction: ((i - 1) / n) * 0.85, message: `Reading page ${i} of ${n}` });
         const logical = pages.length + 1;
-        const built = buildLines(glyphs, logical, vp.width);
-        pages.push({ page: logical, width: vp.width, height: vp.height, lines: built.lines, gutters: built.gutters, graphics: graphics.regions });
+        // A page image covering the page plus a full page of text: a scan with an OCR text layer.
+        // (A full-page figure has a page-size image too, but little text.)
+        const textLayerScan = graphics.largestImageShare > 0.8 && chars > 600;
+        let pageGlyphs = glyphs;
+        let regions = graphics.regions;
+        // A scan that already carries a (hidden) OCR text layer: the figures are only pixels in
+        // the page image, so find them the way we do on scans, using the text layer as the words.
+        if (textLayerScan) {
+          const figures = await findFiguresUnderTextLayer(page, glyphs);
+          pageGlyphs = glyphs.filter((g) => !figures.some((f) => coverage(glyphBox(g), f) > 0.5));
+          regions = [...graphics.regions.filter((r) => (r.x1 - r.x0) * (r.y1 - r.y0) < vp.width * vp.height * 0.6), ...figures];
+        }
+        const built = buildLines(pageGlyphs, logical, vp.width);
+        pages.push({ page: logical, width: vp.width, height: vp.height, lines: built.lines, gutters: built.gutters, graphics: regions, scanTextLayer: textLayerScan });
         refs.push({ pdfPage: i, ocr: false });
       }
       page.cleanup();
@@ -259,6 +317,7 @@ export async function ingestPdf(data: ArrayBuffer | Uint8Array, opts: IngestOpti
     const flows: { page: number; height: number; items: FlowItem[] }[] = [];
     const regions = new Map<string, Region>();
     for (const p of pages) {
+      if (p.scanTextLayer) captionRegions(p, stats, () => makeId('img-'));
       p.graphics.push(...findTextTables(p, stats));
       const found = [...findGraphicRegions(p, stats, () => makeId('img-')), ...(p.presetRegions ?? [])];
       const cols = detectColumns(p.lines, p.gutters, p.width);
