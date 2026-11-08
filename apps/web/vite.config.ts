@@ -52,6 +52,6 @@ export default defineConfig({
   worker: { format: 'es' },
   // In development the library still comes from the server (pnpm serve), on its fixed port.
   server: { proxy: { '/api': 'http://localhost:4300' } },
-  build: { target: 'es2020', chunkSizeWarningLimit: 3000 },
+  build: { target: ['es2020', 'safari15', 'ios15'], chunkSizeWarningLimit: 3000 },
   optimizeDeps: { exclude: ['pdfjs-dist'] },
 });

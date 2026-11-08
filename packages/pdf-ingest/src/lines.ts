@@ -53,9 +53,11 @@ const COMBINING: Record<string, string> = { '´': '\u0301', '`': '\u0300', '˜':
 /** TeX papers draw accents as separate glyphs before the letter ("Cl´audio", "S˜ao"). */
 export function composeAccents(s: string): string {
   // A backtick only counts inside a word, so TeX quotes (``like this'') survive.
-  return s.replace(/([´˜¨ˆ¸ˇ˚]|(?<=\p{L})`) ?(\p{L})/gu, (m, a: string, l: string) => {
+  // (No lookbehind: iPadOS 15 Safari can't parse it, so the letter before is captured instead.)
+  return s.replace(/(\p{L})?([´˜¨ˆ¸ˇ˚`]) ?(\p{L})/gu, (m, pre: string | undefined, a: string, l: string) => {
+    if (a === '`' && !pre) return m;
     const c = ((l === 'ı' ? 'i' : l) + COMBINING[a]).normalize('NFC');
-    return c.length === 1 ? c : m;
+    return c.length === 1 ? (pre ?? '') + c : m;
   });
 }
 
@@ -299,7 +301,7 @@ function superscript(s: string): string {
   if (/^[*†‡§¶#∗⋆]+$/.test(t)) return t;
   // Affiliation markers: "a", "a,b", "a,*", "1ABD", "c,d". Letters go; digits and symbols stay.
   if (/^(?:[A-Z]{1,5}|[a-z]{1,2}|\d{1,2}[A-Z]{0,5})(?:[,\s]*(?:[A-Z]{1,5}|[a-z]{1,2}|\d{1,2}|[*†‡§¶#∗⋆⇑]))*[,*]?$/.test(t)) {
-    const kept = t.replace(/[A-Za-z]/g, '').replace(/^[,\s]+|[,\s]+$/g, '').replace(/,(?=[*†‡§¶#∗⋆⇑])|(?<=[*†‡§¶#∗⋆⇑]),/g, '');
+    const kept = t.replace(/[A-Za-z]/g, '').replace(/^[,\s]+|[,\s]+$/g, '').replace(/,(?=[*†‡§¶#∗⋆⇑])|([*†‡§¶#∗⋆⇑]),/g, '$1');
     return [...kept].map((c) => SUPERSCRIPT[c] ?? c).join('');
   }
   return s;
