@@ -97,11 +97,11 @@ function Reader({ paper, blocks, images }: Loaded) {
   const font = FONTS[settings.font];
   const { layout, pages, bookPages, version, pageOfBlock, firstBlockOnPage, scheduleRelayout, ready } = usePagedLayout(viewport, content, {
     enabled: paged,
-    spread: settings.spread,
+    pagesOnScreen: settings.pagesOnScreen,
     margin: settings.margin,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,
-    deps: [settings.fontSize, settings.lineHeight, settings.font, settings.margin, settings.justify, settings.spread, settings.showPageMarks, settings.showProgress, paged],
+    deps: [settings.fontSize, settings.lineHeight, settings.font, settings.margin, settings.justify, settings.pagesOnScreen, settings.showPageMarks, settings.showProgress, paged],
   });
 
   // Words before each block, for the "time left" estimate.
