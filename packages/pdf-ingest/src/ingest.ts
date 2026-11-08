@@ -8,9 +8,13 @@ import {
   detectColumns,
   documentStats,
   extractAbstract,
-  extractAuthors,
+  findAuthors,
+  tidyFrontNotes,
+  dropDatabaseNotice,
+  tidyHeadings,
   findEquations,
   findGraphicRegions,
+  findTextTables,
   readingOrder,
   removeRunningElements,
   type FlowItem,
@@ -255,6 +259,7 @@ export async function ingestPdf(data: ArrayBuffer | Uint8Array, opts: IngestOpti
     const flows: { page: number; height: number; items: FlowItem[] }[] = [];
     const regions = new Map<string, Region>();
     for (const p of pages) {
+      p.graphics.push(...findTextTables(p, stats));
       const found = [...findGraphicRegions(p, stats, () => makeId('img-')), ...(p.presetRegions ?? [])];
       const cols = detectColumns(p.lines, p.gutters, p.width);
       let items = readingOrder(p.lines, found, cols);
@@ -311,7 +316,18 @@ export async function ingestPdf(data: ArrayBuffer | Uint8Array, opts: IngestOpti
     let title = titleText && titleText.length <= 250 ? titleText : metaTitle ?? titleText ?? fileTitle;
     if (!title.trim()) title = fileTitle;
     if (!blocks.some((b) => b.kind === 'title')) blocks = [{ kind: 'title', text: title, page: 1 }, ...blocks];
-    let authors = extractAuthors(blocks);
+    tidyFrontNotes(blocks);
+    tidyHeadings(blocks);
+    const titleBlock = blocks.find((b): b is Extract<Block, { kind: 'title' }> => b.kind === 'title');
+    if (titleBlock && titleBlock.text.startsWith(title)) title = titleBlock.text;
+    blocks = dropDatabaseNotice(blocks);
+    const found = findAuthors(blocks);
+    // A bold author line set larger than the body can be mistaken for a heading.
+    for (const i of found.indexes) {
+      const b = blocks[i];
+      if (b.kind === 'heading') blocks[i] = { kind: 'paragraph', role: 'front', text: b.text, page: b.page };
+    }
+    let authors = found.names;
     if (!authors.length && typeof info.Author === 'string' && info.Author.trim())
       authors = info.Author.split(/;|,|\band\b|&/).map((s) => s.trim()).filter(Boolean).slice(0, 15);
     const abstract = extractAbstract(blocks);
