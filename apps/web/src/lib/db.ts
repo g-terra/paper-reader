@@ -5,6 +5,17 @@ import type { Block, PageRef } from '@paper-reader/pdf-ingest';
 // files, so every phone, tablet and browser that opens the reader sees the same papers and the
 // same reading positions. This module is the only place that talks to that server.
 
+/** Claude Code proofreading the conversion on the server, see apps/server/review.mjs. */
+export interface PaperReview {
+  status: 'queued' | 'running' | 'done' | 'failed' | 'unavailable' | 'undone';
+  done?: number;
+  total?: number;
+  finishedAt?: number;
+  changedSections?: number;
+  failedSections?: number;
+  error?: string;
+}
+
 export interface PaperRecord {
   id: string;
   title: string;
@@ -24,7 +35,10 @@ export interface PaperRecord {
   progress: number;
   /** Index of the block at the top of the last screen read. */
   position: number;
+  review?: PaperReview;
 }
+
+export const reviewInProgress = (p: PaperRecord) => p.review?.status === 'queued' || p.review?.status === 'running';
 
 export interface NewPaper {
   paper: PaperRecord;
@@ -133,6 +147,18 @@ export async function getContent(id: string): Promise<Block[]> {
 export async function updatePaper(id: string, patch: Partial<Pick<PaperRecord, 'progress' | 'position' | 'lastOpenedAt'>>): Promise<void> {
   patchLocal(id, patch);
   await request(`papers/${id}`, jsonInit('PATCH', patch));
+}
+
+/** Asks Claude Code to proofread the paper again, starting from the converter's own text. */
+export async function reviewPaper(id: string): Promise<void> {
+  const paper = await request<PaperRecord>(`papers/${id}/review`, { method: 'POST' });
+  patchLocal(id, paper);
+}
+
+/** Puts back the text exactly as the converter produced it. */
+export async function undoReview(id: string): Promise<void> {
+  const paper = await request<PaperRecord>(`papers/${id}/review/undo`, { method: 'POST' });
+  patchLocal(id, paper);
 }
 
 export async function deletePaper(id: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AppBar,
@@ -26,7 +26,7 @@ import SortRounded from '@mui/icons-material/SortRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import UploadFileRounded from '@mui/icons-material/UploadFileRounded';
 import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
-import { coverUrl, deletePaper, refreshLibrary, useLibrary, type PaperRecord } from '../lib/db';
+import { coverUrl, deletePaper, refreshLibrary, reviewInProgress, reviewPaper, undoReview, useLibrary, type PaperRecord } from '../lib/db';
 import { enqueueFiles } from '../lib/importer';
 import { CardSkeleton, PaperCard } from '../components/PaperCard';
 import { Sheet } from '../components/Sheet';
@@ -45,7 +45,30 @@ export function LibraryPage() {
   const [sortAnchor, setSortAnchor] = useState<HTMLElement | null>(null);
   const [appearance, setAppearance] = useState(false);
   const [toDelete, setToDelete] = useState<PaperRecord | null>(null);
-  const [details, setDetails] = useState<PaperRecord | null>(null);
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  const details = papers?.find((p) => p.id === detailsId) ?? null;
+  const setDetails = (p: PaperRecord | null) => {
+    setDetailsId(p?.id ?? null);
+    setReviewError(null);
+  };
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const reviewing = !!papers?.some(reviewInProgress);
+
+  // While Claude proofreads a paper on the server, check back now and then to show its progress.
+  useEffect(() => {
+    if (!reviewing) return;
+    const t = setInterval(() => void refreshLibrary(), 8000);
+    return () => clearInterval(t);
+  }, [reviewing]);
+
+  const runReview = async (fn: () => Promise<void>) => {
+    setReviewError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setReviewError((e as Error).message);
+    }
+  };
   const [dragging, setDragging] = useState(false);
   const phone = useMediaQuery('(max-width:640px)');
 
@@ -220,9 +243,27 @@ export function LibraryPage() {
                 <dd>{details.kind === 'digital' ? 'Digital text' : details.kind === 'scanned' ? 'Scanned, text read with OCR' : 'Mixed: some pages read with OCR'}</dd>
                 <dt className="text-muted">Added</dt>
                 <dd>{new Date(details.addedAt).toLocaleString()}</dd>
+                {details.review && (
+                  <>
+                    <dt className="text-muted">Claude</dt>
+                    <dd>{reviewText(details)}</dd>
+                  </>
+                )}
               </dl>
+              {reviewError && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  {reviewError}
+                </Alert>
+              )}
             </DialogContent>
-            <DialogActions>
+            <DialogActions sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+              {details.review?.status === 'done' && !!details.review.changedSections && (
+                <Button onClick={() => void runReview(() => undoReview(details.id))}>Undo Claude's fixes</Button>
+              )}
+              {!reviewInProgress(details) && (
+                <Button onClick={() => void runReview(() => reviewPaper(details.id))}>{details.review?.status === 'done' ? 'Proofread again' : 'Proofread with Claude'}</Button>
+              )}
+              <div className="flex-1" />
               <Button onClick={() => setDetails(null)}>Close</Button>
               <Button variant="contained" onClick={() => navigate(`/read/${details.id}`)}>
                 Read
@@ -233,6 +274,25 @@ export function LibraryPage() {
       </Dialog>
     </div>
   );
+}
+
+function reviewText(p: PaperRecord): string {
+  const r = p.review!;
+  switch (r.status) {
+    case 'queued':
+      return 'Waiting to proofread the text against the PDF';
+    case 'running':
+      return r.total ? `Proofreading, part ${Math.min((r.done ?? 0) + 1, r.total)} of ${r.total}` : 'Proofreading';
+    case 'done':
+      if (!r.changedSections) return r.failedSections ? `Couldn't check ${r.failedSections} part(s); the rest needed no fixes` : 'Proofread, no fixes needed';
+      return `Proofread and fixed${r.failedSections ? ` (${r.failedSections} part(s) couldn't be checked)` : ''}`;
+    case 'failed':
+      return `Couldn't proofread${r.error ? `: ${r.error}` : ''}`;
+    case 'undone':
+      return "Fixes undone, showing the converter's text";
+    default:
+      return 'Claude Code is not available on the server';
+  }
 }
 
 function Grid({ children }: { children: React.ReactNode }) {

@@ -4,7 +4,8 @@ import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import InfoOutlined from '@mui/icons-material/InfoOutlined';
 import DocumentScannerOutlined from '@mui/icons-material/DocumentScannerOutlined';
-import { coverUrl, type PaperRecord } from '../lib/db';
+import AutoFixHighRounded from '@mui/icons-material/AutoFixHighRounded';
+import { coverUrl, reviewInProgress, type PaperRecord } from '../lib/db';
 import { authorLine } from '../lib/format';
 
 interface Props {
@@ -35,6 +36,16 @@ export function PaperCard({ paper, onOpen, onDelete, onDetails }: Props) {
               icon={<DocumentScannerOutlined sx={{ fontSize: 14 }} />}
               label={paper.kind === 'scanned' ? 'Scan' : 'Part scan'}
               sx={{ position: 'absolute', top: 8, left: 8, bgcolor: 'background.default', fontSize: 11, height: 22 }}
+            />
+          </Tooltip>
+        )}
+        {reviewInProgress(paper) && (
+          <Tooltip title="Claude is proofreading the converted text against the PDF">
+            <Chip
+              size="small"
+              icon={<AutoFixHighRounded sx={{ fontSize: 14 }} />}
+              label={paper.review?.status === 'running' && paper.review.total ? `Proofreading ${paper.review.done ?? 0}/${paper.review.total}` : 'Proofreading soon'}
+              sx={{ position: 'absolute', bottom: pct > 0 ? 22 : 8, right: 8, bgcolor: 'background.default', fontSize: 11, height: 22 }}
             />
           </Tooltip>
         )}

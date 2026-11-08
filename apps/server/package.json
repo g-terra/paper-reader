@@ -6,7 +6,7 @@
   "description": "Serves the reader on the local network and keeps the library in a folder on this computer.",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "engines": { "node": ">=20" }
 }
