@@ -18,6 +18,33 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- If the app fails to start (old browser, network hiccup), say why instead of showing a blank page. -->
+    <script>
+      (function () {
+        function show(msg) {
+          var root = document.getElementById('root');
+          if (!root || root.childElementCount) return;
+          root.innerHTML =
+            '<div style="font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px;color:#3b3127">' +
+            '<h1 style="font-size:20px">The reader could not start</h1><p>Please send this to whoever set up the reader:</p>' +
+            '<pre style="white-space:pre-wrap;background:#f3ead8;padding:12px;border-radius:8px;font-size:12px"></pre>' +
+            '<button onclick="location.reload()" style="font-size:15px;padding:8px 16px;border-radius:8px;border:0;background:#9a5b2b;color:#fff">Try again</button></div>';
+          root.querySelector('pre').textContent = msg + '\n\n' + navigator.userAgent;
+          try {
+            navigator.sendBeacon && navigator.sendBeacon('./api/client-error', msg + ' | ' + navigator.userAgent);
+          } catch (e) {}
+        }
+        window.addEventListener('error', function (e) {
+          show(String((e.error && e.error.stack) || e.message || 'Script failed to load'));
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          show(String((e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+        });
+        setTimeout(function () {
+          show('The app did not start within 15 seconds.');
+        }, 15000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
