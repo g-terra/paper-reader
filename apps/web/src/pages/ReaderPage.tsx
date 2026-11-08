@@ -154,6 +154,36 @@ function Reader({ paper, blocks, images }: Loaded) {
     setAnchorState(i);
   }, []);
 
+  // Temporary diagnostics: report how this browser laid the pages out (to the server log), so layout
+  // problems on devices we can't test (older iPads) can be seen.
+  const diagSent = useRef(0);
+  useEffect(() => {
+    if (!paged || !ready || diagSent.current >= 3) return;
+    const t = window.setTimeout(() => {
+      const c = content.current;
+      const v = viewport.current;
+      if (!c || !v || !navigator.sendBeacon) return;
+      diagSent.current++;
+      const end = c.querySelector<HTMLElement>('[data-end]')?.getBoundingClientRect();
+      const box = c.getBoundingClientRect();
+      const cs = getComputedStyle(c);
+      const info = {
+        diag: 'layout',
+        vp: [v.clientWidth, v.clientHeight],
+        layout: { w: layout.width, h: layout.height, cols: layout.columns, gap: layout.gap, colW: Math.round(layout.colW) },
+        pages,
+        bookPages,
+        page,
+        content: { w: Math.round(box.width), h: Math.round(box.height), sw: c.scrollWidth, sh: c.scrollHeight },
+        end: end ? [Math.round(end.left - box.left), Math.round(end.top - box.top)] : null,
+        css: { columnCount: cs.columnCount, columnFill: cs.getPropertyValue('column-fill'), height: cs.height, transform: cs.transform.slice(0, 40) },
+        supports: typeof CSS !== 'undefined' && CSS.supports ? CSS.supports('column-fill', 'auto') : null,
+      };
+      navigator.sendBeacon('./api/client-error', JSON.stringify(info) + ' | ' + navigator.userAgent);
+    }, 2000);
+    return () => window.clearTimeout(t);
+  }, [version, paged, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // After any re-layout, go back to the page holding the anchor block.
   useEffect(() => {
     if (!paged || !ready) return;
@@ -406,6 +436,9 @@ function Reader({ paper, blocks, images }: Loaded) {
                 style={{
                   width: layout.width,
                   columnCount: layout.columns,
+                  // WebKit (Safari, every iPad browser) doesn't split text into columns when the count
+                  // is 1 and no column width is set, so with one page per screen nothing paginated.
+                  columnWidth: layout.colW,
                   columnGap: layout.gap,
                   transform: pageTransform,
                   transition: pageTransition,
