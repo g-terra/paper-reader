@@ -117,6 +117,7 @@ export function AppearanceControls({ compact = false }: { compact?: boolean }) {
 
       <Box className="mt-1 divide-y divide-line border-t border-line">
         <Toggle label="Two pages side by side on wide screens" checked={s.spread} onChange={(v) => set({ spread: v })} />
+        <Toggle label="Show chapter and progress under the page" checked={s.showProgress} onChange={(v) => set({ showProgress: v })} />
         <Toggle label="Show original page numbers" checked={s.showPageMarks} onChange={(v) => set({ showPageMarks: v })} />
         <Tooltip title="Only applies to the Dusk and Night themes" placement="top-start">
           <div>

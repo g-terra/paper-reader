@@ -100,7 +100,8 @@ function Reader({ paper, blocks, images }: Loaded) {
     spread: settings.spread,
     margin: settings.margin,
     fontSize: settings.fontSize,
-    deps: [settings.fontSize, settings.lineHeight, settings.font, settings.margin, settings.justify, settings.spread, settings.showPageMarks, paged],
+    lineHeight: settings.lineHeight,
+    deps: [settings.fontSize, settings.lineHeight, settings.font, settings.margin, settings.justify, settings.spread, settings.showPageMarks, settings.showProgress, paged],
   });
 
   // Words before each block, for the "time left" estimate.
@@ -304,7 +305,7 @@ function Reader({ paper, blocks, images }: Loaded) {
   return (
     <div className="fixed inset-0 flex flex-col bg-page" style={cssVars} lang="en">
       {/* Reading area */}
-      <div className="safe-top relative min-h-0 flex-1">
+      <div className={`safe-top relative min-h-0 flex-1${settings.showProgress ? '' : ' safe-bottom'}`}>
         {paged ? (
           <div
             ref={viewport}
@@ -344,14 +345,16 @@ function Reader({ paper, blocks, images }: Loaded) {
         )}
       </div>
 
-      {/* Quiet footer, always visible, like an e-reader */}
-      <div className="safe-bottom pointer-events-none flex h-8 shrink-0 items-center justify-between px-5 text-[11.5px] text-muted tabular-nums sm:px-8">
-        <span className="truncate pr-3">{chapter || paper.title}</span>
-        <span className="shrink-0">
-          {minutesLeft > 0 ? `${minutesLeft} min left · ` : ''}
-          {Math.round(progress * 100)}%
-        </span>
-      </div>
+      {/* Optional quiet footer. Off by default, so a page shows nothing but its text. */}
+      {settings.showProgress && (
+        <div className="safe-bottom pointer-events-none flex h-8 shrink-0 items-center justify-between px-5 text-[11.5px] text-muted tabular-nums sm:px-8">
+          <span className="truncate pr-3">{chapter || paper.title}</span>
+          <span className="shrink-0">
+            {minutesLeft > 0 ? `${minutesLeft} min left · ` : ''}
+            {Math.round(progress * 100)}%
+          </span>
+        </div>
+      )}
 
       {/* Top bar */}
       <Slide in={chrome} direction="down">
@@ -411,7 +414,7 @@ function Reader({ paper, blocks, images }: Loaded) {
                 />
               )}
               <div className="-mt-1 flex justify-between text-xs text-muted tabular-nums">
-                <span>{paged ? `Screen ${page + 1} of ${pages}` : `${Math.round(scrollProgress * 100)}%`}</span>
+                <span>{paged ? `Page ${page + 1} of ${pages}` : `${Math.round(scrollProgress * 100)}%`}</span>
                 <span>
                   Original page {pageLabel(paper.pages, origPage)} of {paper.pages[paper.pages.length - 1]?.pdfPage ?? paper.pageCount}
                 </span>
