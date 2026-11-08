@@ -1,0 +1,227 @@
+@layer theme, base, mui, components, utilities;
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Literata Variable', Georgia, serif;
+  --color-page: var(--r-bg);
+  --color-surface: var(--r-surface);
+  --color-ink: var(--r-fg);
+  --color-muted: var(--r-muted);
+  --color-accent: var(--r-accent);
+  --color-line: var(--r-border);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--r-bg);
+    color: var(--r-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Reading surface                                                                             */
+
+.reader-viewport {
+  position: relative;
+  overflow: hidden;
+  touch-action: pan-y pinch-zoom;
+}
+
+.reader-content {
+  font-family: var(--reader-font);
+  font-size: var(--reader-size);
+  line-height: var(--reader-lh);
+  color: var(--r-fg);
+  font-optical-sizing: auto;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  hanging-punctuation: first;
+}
+
+.reader-content.paged {
+  height: 100%;
+  column-fill: auto;
+  will-change: transform;
+}
+
+.reader-content .b-p {
+  margin: 0;
+  text-indent: 1.4em;
+  hyphens: var(--reader-hyphens);
+  -webkit-hyphens: var(--reader-hyphens);
+  text-align: var(--reader-align);
+  orphans: 2;
+  widows: 2;
+}
+.reader-content .b-p.first,
+.reader-content .b-heading + .b-p,
+.reader-content .b-figure + .b-p,
+.reader-content .b-mark + .b-p,
+.reader-content .b-title + .b-p {
+  text-indent: 0;
+}
+
+.reader-content .b-title {
+  font-size: 1.65em;
+  line-height: 1.22;
+  font-weight: 650;
+  margin: 0.3em 0 0.6em;
+  text-align: center;
+  text-wrap: balance;
+  letter-spacing: -0.01em;
+  break-after: avoid;
+}
+
+.reader-content .b-heading {
+  font-weight: 650;
+  line-height: 1.3;
+  break-after: avoid;
+  break-inside: avoid;
+  text-wrap: balance;
+}
+.reader-content h2.b-heading {
+  font-size: 1.22em;
+  margin: 1.5em 0 0.5em;
+}
+.reader-content h3.b-heading {
+  font-size: 1.06em;
+  margin: 1.2em 0 0.35em;
+}
+.reader-content h4.b-heading {
+  font-size: 1em;
+  font-style: italic;
+  font-weight: 600;
+  margin: 1em 0 0.25em;
+}
+
+.reader-content .b-front {
+  text-align: center;
+  text-indent: 0;
+  font-size: 0.86em;
+  line-height: 1.45;
+  color: var(--r-muted);
+  margin: 0 0 0.35em;
+  hyphens: manual;
+}
+
+.reader-content .b-abstract {
+  font-size: 0.95em;
+  margin: 0 0 0.6em;
+}
+
+.reader-content .b-reference {
+  font-size: 0.82em;
+  line-height: 1.45;
+  text-indent: -1.5em;
+  padding-left: 1.5em;
+  text-align: left;
+  margin: 0 0 0.5em;
+  hyphens: manual;
+}
+
+.reader-content .b-note,
+.reader-content .b-caption {
+  font-size: 0.82em;
+  line-height: 1.45;
+  text-indent: 0;
+  color: var(--r-muted);
+  margin: 0.4em 0 0.8em;
+}
+
+.reader-content .b-figure {
+  margin: 1em 0;
+  break-inside: avoid;
+  text-align: center;
+}
+.reader-content .b-figure img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+.reader-content.paged .b-figure img {
+  max-height: calc(var(--page-h) - 5em);
+  object-fit: contain;
+}
+.reader-content .b-figure figcaption {
+  font-size: 0.8em;
+  line-height: 1.45;
+  color: var(--r-muted);
+  margin-top: 0.6em;
+  text-align: left;
+}
+.reader-content .b-figure.equation {
+  margin: 0.7em 0;
+}
+.reader-content .b-figure.equation img {
+  border-radius: 0;
+  cursor: default;
+}
+
+/* Blend white figure backgrounds into the page colour. */
+.light-theme .reader-content .b-figure img {
+  mix-blend-mode: multiply;
+}
+.dark-theme .reader-content .b-figure.equation img,
+.dark-theme .reader-content .b-figure.table img,
+.dark-theme.invert-figures .reader-content .b-figure img {
+  filter: invert(0.88) hue-rotate(180deg);
+  mix-blend-mode: screen;
+}
+.dark-theme .reader-content .b-figure img {
+  filter: brightness(0.78) sepia(0.08);
+  border-radius: 6px;
+}
+
+.reader-content .b-mark {
+  display: block;
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: 0.62em;
+  letter-spacing: 0.2em;
+  color: var(--r-muted);
+  opacity: 0.55;
+  margin: 0.6em 0;
+  user-select: none;
+  text-indent: 0;
+}
+
+.reader-content mark.search-hit {
+  background: color-mix(in srgb, var(--r-accent) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.reader-content .flash {
+  animation: flash 1.6s ease-out;
+}
+@keyframes flash {
+  0% {
+    background: color-mix(in srgb, var(--r-accent) 28%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
