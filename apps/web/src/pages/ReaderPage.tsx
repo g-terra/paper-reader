@@ -95,7 +95,7 @@ function Reader({ paper, blocks, images }: Loaded) {
   const [scrollProgress, setScrollProgress] = useState(0);
 
   const font = FONTS[settings.font];
-  const { layout, pages, version, pageOfBlock, firstBlockOnPage, scheduleRelayout, ready } = usePagedLayout(viewport, content, {
+  const { layout, pages, bookPages, version, pageOfBlock, firstBlockOnPage, scheduleRelayout, ready } = usePagedLayout(viewport, content, {
     enabled: paged,
     spread: settings.spread,
     margin: settings.margin,
@@ -287,6 +287,12 @@ function Reader({ paper, blocks, images }: Loaded) {
     '--page-h': `${layout.height}px`,
   } as React.CSSProperties;
 
+  const pageTransform = `translate3d(${-page * layout.stride + drag}px,0,0)`;
+  const pageTransition = dragging ? 'none' : 'transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1)';
+  // Sheets and page numbers for the current screen and its neighbours (enough for a swipe).
+  const sheetIndexes: number[] = [];
+  for (let k = Math.max(0, (page - 1) * layout.columns); k < Math.min(bookPages, (page + 2) * layout.columns); k++) sheetIndexes.push(k);
+
   const blocksView = (
     <BlocksView
       blocks={blocks}
@@ -316,7 +322,40 @@ function Reader({ paper, blocks, images }: Loaded) {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
           >
-            <div style={{ position: 'absolute', left: layout.padX, top: layout.padY, width: layout.width, height: layout.height }}>
+            {layout.sheets && <div className="reader-desk" />}
+            <div style={{ position: 'absolute', left: layout.padX, top: layout.padTop, width: layout.width, height: layout.height }}>
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0"
+                style={{ transform: pageTransform, transition: pageTransition, visibility: ready ? 'visible' : 'hidden' }}
+              >
+                {sheetIndexes.map((k) => (
+                  <div key={k}>
+                    {layout.sheets && (
+                      <div
+                        className="reader-sheet"
+                        style={{
+                          left: k * layout.colStride - layout.sheetPadX,
+                          top: layout.sheetInset - layout.padTop,
+                          width: layout.colW + layout.sheetPadX * 2,
+                          height: layout.padTop + layout.height + layout.padBottom - layout.sheetInset * 2,
+                        }}
+                      />
+                    )}
+                    <div
+                      className="reader-page-number"
+                      style={{
+                        left: k * layout.colStride,
+                        top: layout.height,
+                        width: layout.colW,
+                        height: layout.padBottom - (layout.sheets ? layout.sheetInset : 0),
+                      }}
+                    >
+                      {k + 1} / {bookPages}
+                    </div>
+                  </div>
+                ))}
+              </div>
               <div
                 ref={content}
                 className="reader-content paged"
@@ -324,8 +363,8 @@ function Reader({ paper, blocks, images }: Loaded) {
                   width: layout.width,
                   columnCount: layout.columns,
                   columnGap: layout.gap,
-                  transform: `translate3d(${-page * layout.stride + drag}px,0,0)`,
-                  transition: dragging ? 'none' : 'transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1)',
+                  transform: pageTransform,
+                  transition: pageTransition,
                   visibility: ready ? 'visible' : 'hidden',
                 }}
               >
@@ -336,7 +375,7 @@ function Reader({ paper, blocks, images }: Loaded) {
           </div>
         ) : (
           <div ref={scroller} className="h-full overflow-y-auto overscroll-contain" onScroll={onScroll} onClick={onTap}>
-            <div ref={viewport} className="mx-auto" style={{ maxWidth: settings.fontSize * 36 + layout.padX * 2, padding: `${layout.padY + 56}px ${layout.padX}px 120px` }}>
+            <div ref={viewport} className="mx-auto" style={{ maxWidth: settings.fontSize * 36 + layout.padX * 2, padding: `${layout.padTop + 56}px ${layout.padX}px 120px` }}>
               <div ref={content} className="reader-content">
                 {blocksView}
               </div>
@@ -414,7 +453,7 @@ function Reader({ paper, blocks, images }: Loaded) {
                 />
               )}
               <div className="-mt-1 flex justify-between text-xs text-muted tabular-nums">
-                <span>{paged ? `Page ${page + 1} of ${pages}` : `${Math.round(scrollProgress * 100)}%`}</span>
+                <span>{paged ? `Page ${page * layout.columns + 1} of ${bookPages}` : `${Math.round(scrollProgress * 100)}%`}</span>
                 <span>
                   Original page {pageLabel(paper.pages, origPage)} of {paper.pages[paper.pages.length - 1]?.pdfPage ?? paper.pageCount}
                 </span>
