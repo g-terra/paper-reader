@@ -15,6 +15,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { claudeAvailable, createReviewer } from './review.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4300);
@@ -194,12 +195,29 @@ async function commitPaper(body) {
   return paper;
 }
 
-async function updatePaper(id, patch) {
-  const paper = await getPaper(id);
-  for (const [k, v] of Object.entries(patch ?? {})) if (EDITABLE.has(k)) paper[k] = v;
-  await writeJson(path.join(paperDir(id), 'paper.json'), paper);
-  return paper;
+/** paper.json is changed by the reader and by the Claude review: one change at a time per paper. */
+const paperLocks = new Map();
+function mutatePaper(id, fn) {
+  const prev = paperLocks.get(id) || Promise.resolve();
+  const next = prev.then(async () => {
+    const paper = await getPaper(id);
+    fn(paper);
+    await writeJson(path.join(paperDir(id), 'paper.json'), paper);
+    return paper;
+  });
+  const settled = next.catch(() => {});
+  paperLocks.set(id, settled);
+  settled.then(() => paperLocks.get(id) === settled && paperLocks.delete(id));
+  return next;
 }
+
+function updatePaper(id, patch) {
+  return mutatePaper(id, (paper) => {
+    for (const [k, v] of Object.entries(patch ?? {})) if (EDITABLE.has(k)) paper[k] = v;
+  });
+}
+
+const reviewer = createReviewer({ paperDir, readJson, writeJson, mutatePaper });
 
 /** Removing a paper moves it to .trash in the library folder, so nothing is lost by a wrong tap. */
 async function removePaper(id) {
@@ -221,7 +239,7 @@ async function handleApi(req, res, parts) {
   // parts: ['api', 'papers', id?, sub?, subId?]  or  ['api', 'uploads', id, part, imageId?]
   const [, area, rawId, sub, subId] = parts;
   const m = req.method;
-  if (area === 'health') return sendJson(res, 200, { ok: true, library: LIBRARY });
+  if (area === 'health') return sendJson(res, 200, { ok: true, library: LIBRARY, claudeReview: await claudeAvailable() });
   if (area === 'client-error' && m === 'POST') {
     // Startup errors reported by a browser that couldn't run the app (see index.html).
     const chunks = [];
@@ -244,7 +262,12 @@ async function handleApi(req, res, parts) {
   if (area !== 'papers') throw new HttpError(404, 'Not found');
   if (!rawId) {
     if (m === 'GET') return sendJson(res, 200, await listPapers());
-    if (m === 'POST') return sendJson(res, 201, await commitPaper(await readJsonBody(req)));
+    if (m === 'POST') {
+      const paper = await commitPaper(await readJsonBody(req));
+      // Claude Code (if it's on this computer) proofreads the conversion in the background.
+      void reviewer.enqueue(paper.id).catch((e) => console.warn(`Could not start Claude review: ${e.message}`));
+      return sendJson(res, 201, paper);
+    }
     throw new HttpError(405, 'Method not allowed');
   }
   const id = checkId(rawId);
@@ -253,6 +276,16 @@ async function handleApi(req, res, parts) {
     if (m === 'PATCH') return sendJson(res, 200, await updatePaper(id, await readJsonBody(req)));
     if (m === 'DELETE') return (await removePaper(id), sendJson(res, 200, { ok: true }));
     throw new HttpError(405, 'Method not allowed');
+  }
+  if (sub === 'review' && m === 'POST') {
+    await getPaper(id);
+    if (subId === 'undo') {
+      if (!(await exists(path.join(paperDir(id), 'content.original.json')))) throw new HttpError(409, 'Nothing to undo');
+      return sendJson(res, 200, await reviewer.undo(id));
+    }
+    if (subId) throw new HttpError(404, 'Not found');
+    if (!(await reviewer.enqueue(id))) throw new HttpError(503, 'Claude Code is not available on this computer');
+    return sendJson(res, 202, await getPaper(id));
   }
   if (m !== 'GET' && m !== 'HEAD') throw new HttpError(405, 'Method not allowed');
   const dir = paperDir(id);
@@ -347,6 +380,12 @@ if (!(await exists(path.join(WEB, 'index.html')))) {
 }
 // Imports that never finished (closed tab, lost Wi-Fi) leave a staging folder behind.
 for (const e of await fs.readdir(INCOMING)) await fs.rm(path.join(INCOMING, e), { recursive: true, force: true });
+
+// Reviews cut short by a restart start again.
+for (const p of await listPapers()) {
+  if (p.review?.status !== 'queued' && p.review?.status !== 'running') continue;
+  if (!(await reviewer.enqueue(p.id).catch(() => false))) await mutatePaper(p.id, (q) => void (q.review = { status: 'unavailable' })).catch(() => {});
+}
 
 server.listen(PORT, '0.0.0.0', () => {
   announce();

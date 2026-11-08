@@ -81,6 +81,15 @@ from `node_modules` into `apps/web/public` by `apps/web/scripts/copy-assets.mjs`
    display equations are detected, and lines are joined into paragraphs and headings. Captions are
    attached to their figures. Title, authors and abstract are taken from the first page.
 6. Figures are cropped from a high-resolution render and uploaded with the text to the library server.
+7. **Claude proofreading** (optional): if Claude Code is installed on the server computer, the
+   server runs `claude -p` on each new paper, six pages at a time, with only the Read tool. Claude
+   compares the converted blocks with the original PDF pages and fixes OCR errors, paragraph
+   breaks, leftover headers and footers, headings, roles and captions. Every answer is checked
+   (all figures kept, text length close to the original) before it replaces that part, and the
+   converter's own text is kept as `content.original.json`, so Details > *Undo Claude's fixes*
+   puts it back. Details > *Proofread with Claude* runs it on papers imported earlier. Without
+   Claude Code the step is skipped. Settings: `PAPER_REVIEW=off`, `CLAUDE_BIN`,
+   `PAPER_REVIEW_MODEL`, `PAPER_REVIEW_PAGES`.
 
 ## Testing with the fixtures
 
